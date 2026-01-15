@@ -1,4 +1,4 @@
-.PHONY: build test test-integration lint clean run install release
+.PHONY: build test test-integration lint clean run install release release-dry-run release-snapshot
 
 BINARY=bolt
 BUILD_DIR=bin
@@ -73,3 +73,15 @@ release:
 	git tag -a $(TAG) -m "Release $(TAG)"
 	git push origin $(TAG)
 	@echo "Release $(TAG) pushed. GitHub Actions will build and publish artifacts."
+
+# GoReleaser: test release configuration without publishing
+release-dry-run:
+	goreleaser release --snapshot --clean --skip=publish
+
+# GoReleaser: create snapshot release (for testing)
+release-snapshot:
+	goreleaser release --snapshot --clean
+
+# GoReleaser: check configuration
+release-check:
+	goreleaser check

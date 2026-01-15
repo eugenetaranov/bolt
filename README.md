@@ -6,13 +6,23 @@ Bolt uses simple YAML playbooks to automate system setup and configuration on ma
 
 ## Installation
 
-**Quick install** (requires Go 1.21+):
+### Homebrew (macOS/Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/eugenetaranov/bolt/main/install.sh | bash
+brew install eugenetaranov/tap/bolt
 ```
 
-Or build manually:
+### Download Binary
+
+Download the latest release from the [releases page](https://github.com/eugenetaranov/bolt/releases).
+
+### Go Install
+
+```bash
+go install github.com/eugenetaranov/bolt/cmd/bolt@latest
+```
+
+### Build from Source
 
 ```bash
 git clone https://github.com/eugenetaranov/bolt.git
