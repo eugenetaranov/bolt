@@ -1,4 +1,4 @@
-.PHONY: build test lint clean run install release
+.PHONY: build test test-integration lint clean run install release
 
 BINARY=bolt
 BUILD_DIR=bin
@@ -30,6 +30,9 @@ test:
 test-coverage:
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
+
+test-integration:
+	go test -v -timeout 5m ./tests/integration/...
 
 lint:
 	golangci-lint run

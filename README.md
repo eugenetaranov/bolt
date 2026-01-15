@@ -159,6 +159,7 @@ bolt/
 │   ├── output/         # Formatted terminal output
 │   └── playbook/       # YAML parsing
 ├── pkg/facts/          # System fact gathering
+├── tests/integration/  # Integration tests (testcontainers)
 ├── docs/               # Documentation
 └── examples/           # Example playbooks
 ```
@@ -172,11 +173,26 @@ make build
 # Build for all platforms (cross-compile)
 make build-all
 
-# Run tests
+# Run unit tests
 make test
+
+# Run integration tests (requires Docker)
+make test-integration
 
 # Run linter
 make lint
+```
+
+### Integration Tests
+
+Integration tests use [testcontainers-go](https://golang.testcontainers.org/) to spin up a Docker container, run a playbook against it, and validate the results with Go assertions.
+
+```bash
+# Run integration tests
+go test -v ./tests/integration/...
+
+# Skip integration tests (short mode)
+go test -short ./...
 ```
 
 ## Requirements

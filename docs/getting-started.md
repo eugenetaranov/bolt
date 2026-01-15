@@ -109,12 +109,12 @@ See what would happen without making changes:
 bolt run hello.yaml --dry-run
 ```
 
-### Verbose Output
+### Debug Output
 
 Get detailed information about each task:
 
 ```bash
-bolt run hello.yaml --verbose
+bolt run hello.yaml --debug
 ```
 
 ### Validate Without Running
@@ -141,7 +141,7 @@ Flags:
   -h, --help       help for bolt
   -n, --dry-run    Show what would be done without making changes
       --no-color   Disable colored output
-  -v, --verbose    Enable verbose output
+      --debug      Enable debug output
       --version    version for bolt
 ```
 

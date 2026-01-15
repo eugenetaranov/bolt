@@ -1,0 +1,76 @@
+name: Integration Test
+hosts: bolt-integration-test
+connection: docker
+
+tasks:
+  # ============================================
+  # Command module tests
+  # ============================================
+  - name: Run simple echo command
+    command:
+      cmd: echo "hello from bolt"
+
+  - name: Create marker file via command
+    command:
+      cmd: echo "command-created" > /tmp/command-marker.txt
+
+  # ============================================
+  # File module tests
+  # ============================================
+  - name: Create test directory
+    file:
+      path: /tmp/bolt-test-dir
+      state: directory
+      mode: "0755"
+
+  - name: Create nested directories
+    file:
+      path: /tmp/bolt-test-dir/nested/deep
+      state: directory
+      mode: "0700"
+
+  - name: Create empty file with touch
+    file:
+      path: /tmp/bolt-test-dir/touched.txt
+      state: touch
+      mode: "0644"
+
+  - name: Create file for symlink target
+    copy:
+      dest: /tmp/bolt-test-dir/link-target.txt
+      content: "symlink target content"
+
+  - name: Create symlink
+    file:
+      path: /tmp/bolt-test-dir/test-link
+      src: /tmp/bolt-test-dir/link-target.txt
+      state: link
+
+  # ============================================
+  # Copy module tests
+  # ============================================
+  - name: Copy content to file
+    copy:
+      dest: /tmp/bolt-test-dir/copied.txt
+      content: |
+        This file was created by bolt copy module.
+        Line 2 of the file.
+      mode: "0640"
+
+  - name: Copy file with specific permissions
+    copy:
+      dest: /tmp/bolt-test-dir/executable.sh
+      content: |
+        #!/bin/bash
+        echo "I am executable"
+      mode: "0755"
+
+  - name: Create config file
+    copy:
+      dest: /tmp/bolt-test-dir/config.yaml
+      content: |
+        server:
+          port: 8080
+          host: localhost
+        logging:
+          level: info
