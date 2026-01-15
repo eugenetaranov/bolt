@@ -60,19 +60,33 @@ example:
 	go run ./cmd/bolt run examples/playbooks/setup-dev.yaml --dry-run --debug
 
 # Create and push a release tag
-# Usage: make release TAG=v1.0.0
+# Usage: make release [TAG=v1.0.0]
 release:
 	@if [ -z "$(TAG)" ]; then \
-		echo "Recent tags:"; \
-		git tag --sort=-version:refname | head -3 || echo "  (no tags)"; \
-		echo ""; \
-		echo "Error: TAG is required. Usage: make release TAG=v1.0.0"; \
-		exit 1; \
+		LATEST=$$(git tag --sort=-version:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -1); \
+		if [ -z "$$LATEST" ]; then \
+			SUGGESTED="v0.1.0"; \
+		else \
+			MAJOR=$$(echo $$LATEST | sed 's/v\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\1/'); \
+			MINOR=$$(echo $$LATEST | sed 's/v\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\2/'); \
+			PATCH=$$(echo $$LATEST | sed 's/v\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\3/'); \
+			PATCH=$$((PATCH + 1)); \
+			SUGGESTED="v$$MAJOR.$$MINOR.$$PATCH"; \
+		fi; \
+		echo "Latest tag: $${LATEST:-none}"; \
+		printf "Enter tag [$$SUGGESTED]: "; \
+		read INPUT_TAG; \
+		TAG=$${INPUT_TAG:-$$SUGGESTED}; \
+		echo "Creating release $$TAG..."; \
+		git tag -a $$TAG -m "Release $$TAG" && \
+		git push origin $$TAG && \
+		echo "Release $$TAG pushed. GitHub Actions will build and publish artifacts."; \
+	else \
+		echo "Creating release $(TAG)..."; \
+		git tag -a $(TAG) -m "Release $(TAG)" && \
+		git push origin $(TAG) && \
+		echo "Release $(TAG) pushed. GitHub Actions will build and publish artifacts."; \
 	fi
-	@echo "Creating release $(TAG)..."
-	git tag -a $(TAG) -m "Release $(TAG)"
-	git push origin $(TAG)
-	@echo "Release $(TAG) pushed. GitHub Actions will build and publish artifacts."
 
 # GoReleaser: test release configuration without publishing
 release-dry-run:
