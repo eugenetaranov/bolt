@@ -119,6 +119,10 @@ func TestIntegration(t *testing.T) {
 	t.Logf("Playbook output:\n%s", string(output))
 
 	// Run validation subtests
+	t.Run("RolesSupport", func(t *testing.T) {
+		testRolesSupport(t, ctx, container)
+	})
+
 	t.Run("CommandModule", func(t *testing.T) {
 		testCommandModule(t, ctx, container)
 	})
@@ -129,6 +133,33 @@ func TestIntegration(t *testing.T) {
 
 	t.Run("CopyModule", func(t *testing.T) {
 		testCopyModule(t, ctx, container)
+	})
+}
+
+func testRolesSupport(t *testing.T, ctx context.Context, container testcontainers.Container) {
+	// Verify role tasks executed (role marker file with interpolated variable)
+	t.Run("RoleTasksExecuted", func(t *testing.T) {
+		assertFileExists(t, ctx, container, "/tmp/role-marker.txt")
+		assertFileContains(t, ctx, container, "/tmp/role-marker.txt", []string{
+			"Created by testrole with port 8080", // 8080 comes from role defaults
+		})
+	})
+
+	// Verify file copied from role's files directory
+	t.Run("RoleFileCopied", func(t *testing.T) {
+		assertFileExists(t, ctx, container, "/tmp/role-config.txt")
+		assertFileContains(t, ctx, container, "/tmp/role-config.txt", []string{
+			"This is a role config file",
+			"Port: 8080",
+			"Environment: production",
+		})
+		assertFileMode(t, ctx, container, "/tmp/role-config.txt", "644")
+	})
+
+	// Verify role created directory with correct permissions
+	t.Run("RoleDirectoryCreated", func(t *testing.T) {
+		assertIsDirectory(t, ctx, container, "/tmp/role-test-dir")
+		assertFileMode(t, ctx, container, "/tmp/role-test-dir", "750")
 	})
 }
 

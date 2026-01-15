@@ -1,0 +1,4 @@
+server_port: 8080
+server_host: localhost
+web_root: /tmp/webserver
+log_level: info

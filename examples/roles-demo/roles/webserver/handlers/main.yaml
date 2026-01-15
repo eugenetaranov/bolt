@@ -1,0 +1,3 @@
+- name: Reload webserver
+  command:
+    cmd: echo "Reloading webserver configuration..."

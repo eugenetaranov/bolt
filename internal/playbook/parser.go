@@ -173,6 +173,15 @@ func parseRawPlay(raw map[string]any) (*Play, error) {
 		play.Vars = vars
 	}
 
+	// Parse roles
+	if roles, ok := raw["roles"].([]any); ok {
+		for _, role := range roles {
+			if roleName, ok := role.(string); ok {
+				play.Roles = append(play.Roles, roleName)
+			}
+		}
+	}
+
 	// Parse tasks
 	if tasks, ok := raw["tasks"].([]any); ok {
 		for i, rawTask := range tasks {

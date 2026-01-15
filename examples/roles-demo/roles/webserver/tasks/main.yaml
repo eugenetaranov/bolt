@@ -1,0 +1,34 @@
+- name: Create web root directory
+  file:
+    path: "{{ web_root }}"
+    state: directory
+    mode: "0755"
+
+- name: Create config file
+  copy:
+    dest: "{{ web_root }}/config.yaml"
+    content: |
+      server:
+        port: {{ server_port }}
+        host: {{ server_host }}
+      logging:
+        level: {{ log_level }}
+  notify: Reload webserver
+
+- name: Create index page
+  copy:
+    dest: "{{ web_root }}/index.html"
+    content: |
+      <!DOCTYPE html>
+      <html>
+      <head><title>Welcome</title></head>
+      <body>
+        <h1>Welcome to {{ server_host }}:{{ server_port }}</h1>
+      </body>
+      </html>
+
+- name: Copy robots.txt from role files
+  copy:
+    src: robots.txt
+    dest: "{{ web_root }}/robots.txt"
+    mode: "0644"

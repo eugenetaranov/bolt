@@ -285,6 +285,29 @@ Copy files or content to the target.
     create_dirs: true
 ```
 
+### Using with Roles
+
+When using the copy module within a role, relative `src` paths automatically resolve to the role's `files/` directory:
+
+```yaml
+# In roles/webserver/tasks/main.yaml
+- name: Copy nginx config
+  copy:
+    src: nginx.conf              # Looks in roles/webserver/files/nginx.conf
+    dest: /etc/nginx/nginx.conf
+```
+
+This allows you to organize static files within your role:
+
+```
+roles/webserver/
+├── tasks/
+│   └── main.yaml
+└── files/
+    ├── nginx.conf
+    └── index.html
+```
+
 ### Idempotency
 
 The copy module uses SHA256 checksums to detect changes. It will:

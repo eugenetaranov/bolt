@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -116,8 +117,11 @@ func (e *Executor) Run(ctx context.Context, pb *playbook.Playbook) (*RunResult, 
 
 	e.Output.PlaybookStart(pb.Path)
 
+	// Determine roles directory (relative to playbook)
+	rolesDir := filepath.Join(filepath.Dir(pb.Path), "roles")
+
 	for _, play := range pb.Plays {
-		if err := e.runPlay(ctx, play, stats); err != nil {
+		if err := e.runPlay(ctx, play, stats, rolesDir); err != nil {
 			result.Success = false
 			e.Output.Error("Play failed: %v", err)
 			break
@@ -131,8 +135,18 @@ func (e *Executor) Run(ctx context.Context, pb *playbook.Playbook) (*RunResult, 
 }
 
 // runPlay executes a single play.
-func (e *Executor) runPlay(ctx context.Context, play *playbook.Play, stats *Stats) error {
+func (e *Executor) runPlay(ctx context.Context, play *playbook.Play, stats *Stats, rolesDir string) error {
 	e.Output.PlayStart(play)
+
+	// Load roles if specified
+	var roles []*playbook.Role
+	if len(play.Roles) > 0 {
+		var err error
+		roles, err = playbook.LoadRoles(play.Roles, rolesDir)
+		if err != nil {
+			return fmt.Errorf("failed to load roles: %w", err)
+		}
+	}
 
 	// Create play context
 	pctx := &PlayContext{
@@ -143,10 +157,8 @@ func (e *Executor) runPlay(ctx context.Context, play *playbook.Play, stats *Stat
 		NotifiedHandlers: make(map[string]bool),
 	}
 
-	// Copy play vars
-	for k, v := range play.Vars {
-		pctx.Vars[k] = v
-	}
+	// Merge variables with correct precedence: role defaults < role vars < play vars
+	pctx.Vars = playbook.MergeRoleVars(roles, play.Vars)
 
 	// Add environment variables
 	pctx.Vars["env"] = getEnvMap()
@@ -176,8 +188,12 @@ func (e *Executor) runPlay(ctx context.Context, play *playbook.Play, stats *Stat
 		e.Output.TaskResult("Gathering Facts", "ok", false, "")
 	}
 
+	// Expand role tasks and handlers
+	allTasks := playbook.ExpandRoleTasks(roles, play.Tasks)
+	allHandlers := playbook.ExpandRoleHandlers(roles, play.Handlers)
+
 	// Execute tasks
-	for _, task := range play.Tasks {
+	for _, task := range allTasks {
 		stats.Tasks++
 
 		taskResult, err := e.runTask(ctx, pctx, task)
@@ -200,8 +216,8 @@ func (e *Executor) runPlay(ctx context.Context, play *playbook.Play, stats *Stat
 		}
 	}
 
-	// Run notified handlers
-	if err := e.runHandlers(ctx, pctx, stats); err != nil {
+	// Run notified handlers (using expanded handlers)
+	if err := e.runHandlersExpanded(ctx, pctx, stats, allHandlers); err != nil {
 		return err
 	}
 
@@ -262,6 +278,11 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 	if err != nil {
 		e.Output.TaskResult(taskName, "failed", false, err.Error())
 		return nil, fmt.Errorf("failed to interpolate parameters: %w", err)
+	}
+
+	// Inject role path for role tasks (allows modules like copy to find role files)
+	if task.RolePath != "" {
+		params["_role_path"] = task.RolePath
 	}
 
 	// Handle dry run
@@ -359,15 +380,15 @@ func (e *Executor) runTaskLoop(ctx context.Context, pctx *PlayContext, task *pla
 	return &TaskResult{Status: status, Changed: anyChanged}, nil
 }
 
-// runHandlers executes notified handlers.
-func (e *Executor) runHandlers(ctx context.Context, pctx *PlayContext, stats *Stats) error {
+// runHandlersExpanded executes notified handlers from the expanded handlers list.
+func (e *Executor) runHandlersExpanded(ctx context.Context, pctx *PlayContext, stats *Stats, handlers []*playbook.Task) error {
 	if len(pctx.NotifiedHandlers) == 0 {
 		return nil
 	}
 
 	e.Output.Section("RUNNING HANDLERS")
 
-	for _, handler := range pctx.Play.Handlers {
+	for _, handler := range handlers {
 		if !pctx.NotifiedHandlers[handler.Name] {
 			continue
 		}

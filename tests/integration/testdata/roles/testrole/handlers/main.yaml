@@ -1,0 +1,3 @@
+- name: Role handler
+  command:
+    cmd: echo "role handler triggered" > /tmp/role-handler-marker.txt

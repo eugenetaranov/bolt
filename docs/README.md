@@ -6,6 +6,7 @@ Bolt is a Go-based configuration management and system bootstrapping tool inspir
 
 - [Getting Started](getting-started.md) - Installation and first steps
 - [Playbooks](playbooks.md) - Playbook structure and syntax
+- [Roles](roles.md) - Reusable role structure
 - [Modules](modules.md) - Available modules reference
 - [Variables & Facts](variables.md) - Variable interpolation and system facts
 - [Connectors](connectors.md) - Connection methods (local, SSH, SSM)

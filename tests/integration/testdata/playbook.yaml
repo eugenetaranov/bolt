@@ -2,6 +2,9 @@ name: Integration Test
 hosts: bolt-integration-test
 connection: docker
 
+roles:
+  - testrole
+
 tasks:
   # ============================================
   # Command module tests

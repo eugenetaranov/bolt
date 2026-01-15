@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/usr/local/go/bin/go build:*)",
+      "Bash(/usr/local/go/bin/go test:*)",
+      "Bash(go build:*)",
+      "Bash(make build:*)"
+    ]
+  }
+}

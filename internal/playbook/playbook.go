@@ -29,6 +29,9 @@ type Play struct {
 	// Vars defines variables available to all tasks in the play.
 	Vars map[string]any `yaml:"vars"`
 
+	// Roles is the list of roles to include in the play.
+	Roles []string `yaml:"roles"`
+
 	// Tasks is the list of tasks to execute.
 	Tasks []*Task `yaml:"tasks"`
 
@@ -55,6 +58,9 @@ type Task struct {
 
 	// Params are the parameters to pass to the module.
 	Params map[string]any `yaml:"-"`
+
+	// RolePath is the path to the role this task belongs to (empty for play tasks).
+	RolePath string `yaml:"-"`
 
 	// When is a conditional expression; task runs only if true.
 	When string `yaml:"when"`
@@ -92,6 +98,27 @@ type Task struct {
 
 	// Failed controls when the task reports as failed.
 	FailedWhen string `yaml:"failed_when"`
+}
+
+// Role represents an Ansible-compatible role with tasks, handlers, and variables.
+type Role struct {
+	// Name is the role name (directory name).
+	Name string
+
+	// Path is the absolute path to the role directory.
+	Path string
+
+	// Tasks loaded from tasks/main.yaml.
+	Tasks []*Task
+
+	// Handlers loaded from handlers/main.yaml.
+	Handlers []*Task
+
+	// Vars loaded from vars/main.yaml (higher priority).
+	Vars map[string]any
+
+	// Defaults loaded from defaults/main.yaml (lower priority).
+	Defaults map[string]any
 }
 
 // ShouldGatherFacts returns whether facts should be gathered for this play.

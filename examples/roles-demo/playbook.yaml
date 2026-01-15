@@ -1,0 +1,14 @@
+name: Roles Demo
+hosts: localhost
+connection: local
+
+roles:
+  - webserver
+
+vars:
+  app_name: myapp
+
+tasks:
+  - name: Show configuration
+    command:
+      cmd: echo "App {{ app_name }} running on port {{ server_port }}"

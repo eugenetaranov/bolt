@@ -24,6 +24,7 @@ sudo make install
 ## Features
 
 - **Simple YAML playbooks** - Declarative configuration with familiar syntax
+- **Ansible-compatible roles** - Reusable role structure with tasks, handlers, vars
 - **Idempotent operations** - Safe to run multiple times
 - **Cross-platform** - Supports macOS and Linux
 - **Multiple connectors** - Local, Docker, SSH (planned), AWS SSM (planned)
@@ -133,6 +134,7 @@ bolt run container-setup.yaml
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation and first steps |
 | [Playbooks](docs/playbooks.md) | Playbook structure, tasks, handlers, loops |
+| [Roles](docs/roles.md) | Reusable role structure |
 | [Modules](docs/modules.md) | Available modules reference |
 | [Variables & Facts](docs/variables.md) | Variable interpolation and system facts |
 | [Connectors](docs/connectors.md) | Connection methods (local, Docker, SSH, SSM) |

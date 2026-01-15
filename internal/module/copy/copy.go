@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -68,10 +69,23 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 	// Get source content
 	var srcContent []byte
 	if src != "" {
+		// Resolve source path - check if it's relative and we have a role path
+		srcPath := src
+		if !filepath.IsAbs(src) {
+			// Check for role path (injected by executor for role tasks)
+			if rolePath := getString(params, "_role_path", ""); rolePath != "" {
+				// Look in role's files directory
+				roleFilePath := filepath.Join(rolePath, "files", src)
+				if _, err := os.Stat(roleFilePath); err == nil {
+					srcPath = roleFilePath
+				}
+			}
+		}
+
 		// Read from local file
-		data, err := os.ReadFile(src)
+		data, err := os.ReadFile(srcPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read source file: %w", err)
+			return nil, fmt.Errorf("failed to read source file '%s': %w", srcPath, err)
 		}
 		srcContent = data
 	} else {

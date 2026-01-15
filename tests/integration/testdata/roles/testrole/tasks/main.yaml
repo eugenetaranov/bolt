@@ -1,0 +1,16 @@
+- name: Create role marker file
+  copy:
+    dest: /tmp/role-marker.txt
+    content: "Created by testrole with port {{ role_port }}"
+
+- name: Copy config from role files directory
+  copy:
+    src: role-config.txt
+    dest: /tmp/role-config.txt
+    mode: "0644"
+
+- name: Create role directory
+  file:
+    path: /tmp/role-test-dir
+    state: directory
+    mode: "0750"
