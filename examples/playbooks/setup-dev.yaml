@@ -1,0 +1,95 @@
+# Example playbook: Setup Development Machine
+# Run with: bolt run examples/playbooks/setup-dev.yaml
+
+name: Setup Development Machine
+hosts: localhost
+connection: local
+gather_facts: true
+
+vars:
+  projects_dir: "{{ env.HOME }}/projects"
+  config_dir: "{{ env.HOME }}/.config"
+
+tasks:
+  - name: Create projects directory
+    file:
+      path: "{{ projects_dir }}"
+      state: directory
+      mode: "0755"
+
+  - name: Create config directory
+    file:
+      path: "{{ config_dir }}"
+      state: directory
+      mode: "0700"
+
+  # macOS specific tasks
+  - name: Install Homebrew packages (macOS)
+    brew:
+      name:
+        - git
+        - go
+        - ripgrep
+        - jq
+        - fzf
+      state: present
+    when: facts.os_family == 'Darwin'
+
+  - name: Install Homebrew casks (macOS)
+    brew:
+      name:
+        - visual-studio-code
+        - iterm2
+      cask: true
+      state: present
+    when: facts.os_family == 'Darwin'
+
+  # Linux specific tasks
+  - name: Update apt cache (Debian/Ubuntu)
+    apt:
+      update_cache: true
+      cache_valid_time: 3600
+    when: facts.os_family == 'Debian'
+
+  - name: Install packages (Debian/Ubuntu)
+    apt:
+      name:
+        - git
+        - golang
+        - ripgrep
+        - jq
+        - fzf
+        - build-essential
+      state: present
+    when: facts.os_family == 'Debian'
+
+  # Common tasks
+  - name: Create git config directory
+    file:
+      path: "{{ env.HOME }}/.config/git"
+      state: directory
+      mode: "0755"
+
+  - name: Configure git (example)
+    copy:
+      dest: "{{ env.HOME }}/.config/git/config"
+      content: |
+        [init]
+            defaultBranch = main
+        [pull]
+            rebase = true
+        [push]
+            autoSetupRemote = true
+      mode: "0644"
+
+  - name: Create shell profile marker
+    command:
+      cmd: echo "# Bolt managed" >> {{ env.HOME }}/.profile
+      creates: "{{ env.HOME }}/.bolt_configured"
+    register: profile_result
+
+  - name: Mark as configured
+    file:
+      path: "{{ env.HOME }}/.bolt_configured"
+      state: touch
+    when: profile_result.changed

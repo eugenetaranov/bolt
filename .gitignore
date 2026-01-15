@@ -1,0 +1,27 @@
+# Build artifacts
+bin/
+dist/
+
+# Test artifacts
+coverage.out
+coverage.html
+*.test
+
+# Go
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+.env
+.envrc

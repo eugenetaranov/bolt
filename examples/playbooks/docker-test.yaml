@@ -1,0 +1,23 @@
+name: Test Docker Container
+hosts: bolt-test
+connection: docker
+
+tasks:
+  - name: Say hello
+    command:
+      cmd: echo "Hello from Bolt inside Docker!"
+
+  - name: Show OS info
+    command:
+      cmd: cat /etc/os-release
+
+  - name: Create a file
+    copy:
+      dest: /tmp/bolt-was-here.txt
+      content: |
+        Bolt successfully configured this container!
+        Timestamp: {{ env.USER }}@localhost
+
+  - name: List created file
+    command:
+      cmd: cat /tmp/bolt-was-here.txt
