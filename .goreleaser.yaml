@@ -30,16 +30,13 @@ builds:
 
 archives:
   - id: default
-    format: tar.gz
+    formats:
+      - tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
       {{- .Os }}_
       {{- .Arch }}
-    # Use zip for Windows (if added later)
-    format_overrides:
-      - goos: windows
-        format: zip
     files:
       - README.md
       - LICENSE*
@@ -101,7 +98,7 @@ release:
     ```
 
 # Homebrew Tap
-brews:
+homebrew:
   - name: bolt
     repository:
       owner: eugenetaranov
