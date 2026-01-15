@@ -1,4 +1,4 @@
-.PHONY: build test lint clean run install
+.PHONY: build test lint clean run install release
 
 BINARY=bolt
 BUILD_DIR=bin
@@ -55,3 +55,18 @@ validate-examples:
 # Run example playbook (dry-run)
 example:
 	go run ./cmd/bolt run examples/playbooks/setup-dev.yaml --dry-run --debug
+
+# Create and push a release tag
+# Usage: make release TAG=v1.0.0
+release:
+	@if [ -z "$(TAG)" ]; then \
+		echo "Recent tags:"; \
+		git tag --sort=-version:refname | head -3 || echo "  (no tags)"; \
+		echo ""; \
+		echo "Error: TAG is required. Usage: make release TAG=v1.0.0"; \
+		exit 1; \
+	fi
+	@echo "Creating release $(TAG)..."
+	git tag -a $(TAG) -m "Release $(TAG)"
+	git push origin $(TAG)
+	@echo "Release $(TAG) pushed. GitHub Actions will build and publish artifacts."
