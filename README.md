@@ -148,6 +148,7 @@ bolt run container-setup.yaml
 | `command` | Execute shell commands |
 | `copy` | Copy files or write content |
 | `file` | Manage files, directories, and symlinks |
+| `template` | Render templates with variable substitution |
 
 ## Project Structure
 

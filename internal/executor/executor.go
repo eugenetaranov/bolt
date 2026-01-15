@@ -285,6 +285,11 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 		params["_role_path"] = task.RolePath
 	}
 
+	// Inject template variables for template module
+	if task.Module == "template" {
+		params["_template_vars"] = pctx.Vars
+	}
+
 	// Handle dry run
 	if e.DryRun {
 		e.Output.TaskResult(taskName, "skipped (dry run)", false, "")

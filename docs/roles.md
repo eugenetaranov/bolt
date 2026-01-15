@@ -17,8 +17,10 @@ project/
         │   └── main.yaml      # Default variables (lowest priority)
         ├── vars/
         │   └── main.yaml      # Role variables (higher priority)
-        └── files/
-            └── ...            # Static files for copy module
+        ├── files/
+        │   └── ...            # Static files for copy module
+        └── templates/
+            └── ...            # Template files for template module
 ```
 
 ## Using Roles
@@ -109,6 +111,45 @@ roles/webserver/
 │   └── main.yaml
 └── files/
     ├── nginx.conf
+    └── robots.txt
+```
+
+### templates/
+
+Template files that are rendered with variable substitution using the `template` module.
+
+When a role task uses the `template` module with a relative `src` path, Bolt automatically looks for the template in the role's `templates/` directory:
+
+```yaml
+# In roles/webserver/tasks/main.yaml
+- name: Deploy nginx config
+  template:
+    src: nginx.conf.j2        # Looks in roles/webserver/templates/nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    mode: "0644"
+```
+
+Templates use Go's `text/template` syntax (`{{ .variable }}`):
+
+```
+# roles/webserver/templates/nginx.conf.j2
+server {
+    listen {{ .server_port }};
+    server_name {{ .server_host }};
+    root {{ .web_root }};
+}
+```
+
+Place your template files in the role's `templates/` directory:
+
+```
+roles/webserver/
+├── tasks/
+│   └── main.yaml
+├── templates/
+│   ├── nginx.conf.j2
+│   └── app.conf.j2
+└── files/
     └── robots.txt
 ```
 

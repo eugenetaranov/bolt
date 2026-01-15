@@ -156,6 +156,17 @@ func testRolesSupport(t *testing.T, ctx context.Context, container testcontainer
 		assertFileMode(t, ctx, container, "/tmp/role-config.txt", "644")
 	})
 
+	// Verify template rendered from role's templates directory
+	t.Run("RoleTemplateRendered", func(t *testing.T) {
+		assertFileExists(t, ctx, container, "/tmp/role-app.conf")
+		assertFileContains(t, ctx, container, "/tmp/role-app.conf", []string{
+			"# Application Configuration",
+			"port = 8080", // role_port from defaults/main.yaml
+			"name = testrole-app",
+		})
+		assertFileMode(t, ctx, container, "/tmp/role-app.conf", "644")
+	})
+
 	// Verify role created directory with correct permissions
 	t.Run("RoleDirectoryCreated", func(t *testing.T) {
 		assertIsDirectory(t, ctx, container, "/tmp/role-test-dir")

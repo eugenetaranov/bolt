@@ -16,6 +16,7 @@ import (
 	_ "github.com/eugenetaranov/bolt/internal/module/command"
 	_ "github.com/eugenetaranov/bolt/internal/module/copy"
 	_ "github.com/eugenetaranov/bolt/internal/module/file"
+	_ "github.com/eugenetaranov/bolt/internal/module/template"
 
 	"github.com/eugenetaranov/bolt/internal/executor"
 	"github.com/eugenetaranov/bolt/internal/module"

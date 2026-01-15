@@ -11,6 +11,7 @@ Modules are the units of work in Bolt. Each module performs a specific action li
 | [command](#command) | Execute shell commands |
 | [copy](#copy) | Copy files to targets |
 | [file](#file) | Manage files and directories |
+| [template](#template) | Render templates to targets |
 
 ---
 
@@ -399,6 +400,98 @@ Manage files, directories, and symlinks.
     path: /var/run/myapp.updated
     state: touch
 ```
+
+---
+
+## template
+
+Render templates to the target with variable substitution using Go's text/template syntax.
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `src` | string | **yes** | - | Template file path (relative to role's templates/) |
+| `dest` | string | **yes** | - | Destination path on target |
+| `mode` | string | no | `0644` | File permissions |
+| `owner` | string | no | - | Owner username |
+| `group` | string | no | - | Group name |
+| `backup` | bool | no | `false` | Create backup before overwriting |
+
+### Template Syntax
+
+Templates use Go's `text/template` syntax with `{{ .variable }}` notation:
+
+```
+# Config file for {{ .app_name }}
+server:
+  host: {{ .server_host }}
+  port: {{ .server_port }}
+```
+
+All playbook variables (play vars, role vars, facts, registered variables) are available in templates.
+
+### Built-in Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `default` | Fallback value if empty | `{{ default "localhost" .host }}` |
+| `lower` | Lowercase string | `{{ lower .env }}` |
+| `upper` | Uppercase string | `{{ upper .env }}` |
+| `trim` | Trim whitespace | `{{ trim .value }}` |
+
+### Examples
+
+```yaml
+# Render a config template
+- name: Deploy nginx config
+  template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    mode: "0644"
+    owner: root
+    group: root
+    backup: true
+
+# Simple application config
+- name: Create app config
+  template:
+    src: app.yaml.j2
+    dest: /opt/myapp/config.yaml
+    mode: "0600"
+```
+
+### Using with Roles
+
+When using the template module within a role, relative `src` paths automatically resolve to the role's `templates/` directory:
+
+```yaml
+# In roles/webserver/tasks/main.yaml
+- name: Deploy nginx config
+  template:
+    src: nginx.conf.j2     # Looks in roles/webserver/templates/nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+```
+
+Role directory structure:
+
+```
+roles/webserver/
+├── tasks/
+│   └── main.yaml
+├── templates/
+│   ├── nginx.conf.j2
+│   └── app.conf.j2
+└── files/
+    └── static-file.txt
+```
+
+### Idempotency
+
+The template module uses SHA256 checksums to detect changes. It will:
+- Render the template and compare checksum with destination
+- Skip if rendered content matches existing file
+- Only update attributes if content is same but mode/owner differs
 
 ---
 

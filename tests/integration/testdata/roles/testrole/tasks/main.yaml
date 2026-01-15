@@ -9,6 +9,12 @@
     dest: /tmp/role-config.txt
     mode: "0644"
 
+- name: Render template from role templates directory
+  template:
+    src: app.conf.j2
+    dest: /tmp/role-app.conf
+    mode: "0644"
+
 - name: Create role directory
   file:
     path: /tmp/role-test-dir

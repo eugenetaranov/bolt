@@ -32,3 +32,10 @@
     src: robots.txt
     dest: "{{ web_root }}/robots.txt"
     mode: "0644"
+
+- name: Generate nginx config from template
+  template:
+    src: nginx.conf.j2
+    dest: "{{ web_root }}/nginx.conf"
+    mode: "0644"
+  notify: Reload webserver
