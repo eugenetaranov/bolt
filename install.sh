@@ -6,9 +6,8 @@
 
 set -e
 
-REPO="https://github.com/eugenetaranov/bolt.git"
+GITHUB_REPO="eugenetaranov/bolt"
 INSTALL_DIR="/usr/local/bin"
-BOLT_DIR="${BOLT_DIR:-$HOME/.bolt}"
 
 # Colors
 RED='\033[0;31m'
@@ -52,30 +51,10 @@ detect_arch() {
     esac
 }
 
-# Check for required commands
-check_requirements() {
-    local missing=()
-
-    if ! command -v git &> /dev/null; then
-        missing+=("git")
-    fi
-
-    if ! command -v go &> /dev/null; then
-        # Check common Go installation paths
-        if [ -x "/usr/local/go/bin/go" ]; then
-            export PATH="/usr/local/go/bin:$PATH"
-        elif [ -x "/opt/homebrew/bin/go" ]; then
-            export PATH="/opt/homebrew/bin:$PATH"
-        elif [ -x "$HOME/go/bin/go" ]; then
-            export PATH="$HOME/go/bin:$PATH"
-        else
-            missing+=("go")
-        fi
-    fi
-
-    if [ ${#missing[@]} -ne 0 ]; then
-        error "Missing required tools: ${missing[*]}\n\nPlease install them and try again.\n\nOn macOS:  brew install ${missing[*]}\nOn Ubuntu: sudo apt install ${missing[*]}"
-    fi
+# Get latest release tag from GitHub
+get_latest_release() {
+    curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null | \
+        grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/'
 }
 
 # Main installation
@@ -92,40 +71,39 @@ main() {
 
     info "Detected: $os/$arch"
 
-    check_requirements
+    # Get latest release
+    local version=$(get_latest_release)
+    if [ -z "$version" ]; then
+        error "No releases found. Please check https://github.com/${GITHUB_REPO}/releases"
+    fi
 
-    info "Go version: $(go version | awk '{print $3}')"
+    # Download binary
+    local binary_name="bolt-${os}-${arch}"
+    local download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${binary_name}"
 
-    # Create temp directory
+    info "Downloading ${binary_name} ${version}..."
+
     local tmp_dir=$(mktemp -d)
     trap "rm -rf $tmp_dir" EXIT
 
-    info "Cloning repository..."
-    git clone --depth 1 --quiet "$REPO" "$tmp_dir/bolt"
+    if ! curl -fsSL -o "${tmp_dir}/bolt" "$download_url"; then
+        error "Failed to download from ${download_url}"
+    fi
 
-    info "Building bolt..."
-    cd "$tmp_dir/bolt"
-
-    # Build with version info
-    local version=$(git describe --tags --always 2>/dev/null || echo "dev")
-    local commit=$(git rev-parse --short HEAD 2>/dev/null || echo "none")
-    local date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-    go build -ldflags "-X main.version=$version -X main.commit=$commit -X main.date=$date" \
-        -o bolt ./cmd/bolt
+    chmod +x "${tmp_dir}/bolt"
 
     # Install binary
     info "Installing to $INSTALL_DIR..."
 
     if [ -w "$INSTALL_DIR" ]; then
-        mv bolt "$INSTALL_DIR/bolt"
+        mv "$tmp_dir/bolt" "$INSTALL_DIR/bolt"
     else
-        sudo mv bolt "$INSTALL_DIR/bolt"
+        sudo mv "$tmp_dir/bolt" "$INSTALL_DIR/bolt"
     fi
 
     # Verify installation
     if command -v bolt &> /dev/null; then
-        success "Bolt installed successfully!"
+        success "Bolt ${version} installed successfully!"
         echo ""
         bolt --version
         echo ""
@@ -134,7 +112,7 @@ main() {
         echo "  bolt modules             List available modules"
         echo "  bolt run playbook.yaml   Run a playbook"
         echo ""
-        echo "Documentation: https://github.com/eugenetaranov/bolt/tree/main/docs"
+        echo "Documentation: https://github.com/${GITHUB_REPO}/tree/main/docs"
     else
         warn "Bolt was installed to $INSTALL_DIR but is not in your PATH"
         echo "Add this to your shell profile:"
