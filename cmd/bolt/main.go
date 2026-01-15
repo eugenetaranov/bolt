@@ -136,9 +136,9 @@ func runPlaybook(cmd *cobra.Command, args []string) error {
 
 // validateCmd validates a playbook without running it
 var validateCmd = &cobra.Command{
-	Use:   "validate <playbook.yaml>",
-	Short: "Validate a playbook",
-	Long: `Parse and validate a playbook without executing it.
+	Use:   "validate <playbook.yaml> [playbook2.yaml ...]",
+	Short: "Validate one or more playbooks",
+	Long: `Parse and validate playbooks without executing them.
 
 This checks for:
   - Valid YAML syntax
@@ -147,23 +147,42 @@ This checks for:
   - Task structure
 
 Examples:
-  bolt validate setup.yaml`,
-	Args: cobra.ExactArgs(1),
-	RunE: validatePlaybook,
+  bolt validate setup.yaml
+  bolt validate *.yaml`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: validatePlaybooks,
 }
 
-func validatePlaybook(cmd *cobra.Command, args []string) error {
-	playbookPath := args[0]
+func validatePlaybooks(cmd *cobra.Command, args []string) error {
+	var hasErrors bool
 
+	for _, playbookPath := range args {
+		if err := validatePlaybook(playbookPath); err != nil {
+			fmt.Printf("FAIL: %s - %v\n", playbookPath, err)
+			hasErrors = true
+		} else {
+			fmt.Printf("OK: %s\n", playbookPath)
+		}
+	}
+
+	if hasErrors {
+		return fmt.Errorf("one or more playbooks failed validation")
+	}
+
+	fmt.Printf("\nAll %d playbook(s) valid.\n", len(args))
+	return nil
+}
+
+func validatePlaybook(playbookPath string) error {
 	// Check if file exists
 	if _, err := os.Stat(playbookPath); os.IsNotExist(err) {
-		return fmt.Errorf("playbook not found: %s", playbookPath)
+		return fmt.Errorf("not found")
 	}
 
 	// Parse playbook
 	pb, err := playbook.ParseFileRaw(playbookPath)
 	if err != nil {
-		return fmt.Errorf("validation failed: %w", err)
+		return err
 	}
 
 	// Validate modules exist
@@ -172,39 +191,20 @@ func validatePlaybook(cmd *cobra.Command, args []string) error {
 		for _, task := range play.Tasks {
 			playbook.ExpandShorthand(task)
 			if err := playbook.ResolveModule(task); err != nil {
-				errors = append(errors, fmt.Sprintf("  - %s: %v", task.String(), err))
+				errors = append(errors, fmt.Sprintf("%s: %v", task.String(), err))
 			}
 		}
 		for _, handler := range play.Handlers {
 			playbook.ExpandShorthand(handler)
 			if err := playbook.ResolveModule(handler); err != nil {
-				errors = append(errors, fmt.Sprintf("  - %s: %v", handler.String(), err))
+				errors = append(errors, fmt.Sprintf("%s: %v", handler.String(), err))
 			}
 		}
 	}
 
 	if len(errors) > 0 {
-		fmt.Println("Validation errors:")
-		for _, e := range errors {
-			fmt.Println(e)
-		}
-		return fmt.Errorf("playbook has %d error(s)", len(errors))
+		return fmt.Errorf("%d error(s): %s", len(errors), errors[0])
 	}
-
-	// Print summary
-	fmt.Printf("Playbook: %s\n", playbookPath)
-	fmt.Printf("  Plays: %d\n", len(pb.Plays))
-
-	totalTasks := 0
-	totalHandlers := 0
-	for _, play := range pb.Plays {
-		totalTasks += len(play.Tasks)
-		totalHandlers += len(play.Handlers)
-	}
-
-	fmt.Printf("  Tasks: %d\n", totalTasks)
-	fmt.Printf("  Handlers: %d\n", totalHandlers)
-	fmt.Println("\nValidation successful!")
 
 	return nil
 }
