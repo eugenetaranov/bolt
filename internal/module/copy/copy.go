@@ -230,12 +230,18 @@ func getRemoteChecksum(ctx context.Context, conn connector.Connector, path strin
 	}
 }
 
-// ensureAttributes sets mode and ownership on a file.
+// ensureAttributes sets mode and ownership on a file, only if they differ from desired.
 func ensureAttributes(ctx context.Context, conn connector.Connector, path, mode, owner, group string) (bool, error) {
 	var changed bool
 
-	// Set mode
-	if mode != "" {
+	// Get current attributes
+	currentMode, currentOwner, currentGroup, err := getFileAttributes(ctx, conn, path)
+	if err != nil {
+		return false, fmt.Errorf("failed to get file attributes: %w", err)
+	}
+
+	// Set mode only if different
+	if mode != "" && currentMode != mode {
 		result, err := conn.Execute(ctx, fmt.Sprintf("chmod %s %s", mode, shellQuote(path)))
 		if err != nil {
 			return false, fmt.Errorf("failed to set mode: %w", err)
@@ -246,8 +252,11 @@ func ensureAttributes(ctx context.Context, conn connector.Connector, path, mode,
 		changed = true
 	}
 
-	// Set ownership
-	if owner != "" || group != "" {
+	// Set ownership only if different
+	needOwnerChange := owner != "" && currentOwner != owner
+	needGroupChange := group != "" && currentGroup != group
+
+	if needOwnerChange || needGroupChange {
 		var ownership string
 		if owner != "" && group != "" {
 			ownership = fmt.Sprintf("%s:%s", owner, group)
@@ -268,6 +277,34 @@ func ensureAttributes(ctx context.Context, conn connector.Connector, path, mode,
 	}
 
 	return changed, nil
+}
+
+// getFileAttributes returns the mode, owner, and group of a file.
+func getFileAttributes(ctx context.Context, conn connector.Connector, path string) (mode, owner, group string, err error) {
+	// Use stat to get file attributes in a portable way
+	// Format: mode owner group (e.g., "0644 root wheel")
+	cmd := fmt.Sprintf(`stat -c '%%a %%U %%G' %[1]s 2>/dev/null || stat -f '%%Lp %%Su %%Sg' %[1]s`, shellQuote(path))
+
+	result, err := conn.Execute(ctx, cmd)
+	if err != nil {
+		return "", "", "", err
+	}
+	if result.ExitCode != 0 {
+		return "", "", "", fmt.Errorf("stat failed: %s", result.Stderr)
+	}
+
+	parts := strings.Fields(strings.TrimSpace(result.Stdout))
+	if len(parts) >= 3 {
+		// Normalize mode to 4 digits with leading zero
+		mode = parts[0]
+		if len(mode) < 4 {
+			mode = strings.Repeat("0", 4-len(mode)) + mode
+		}
+		owner = parts[1]
+		group = parts[2]
+	}
+
+	return mode, owner, group, nil
 }
 
 // createParentDirs creates parent directories for a path.
