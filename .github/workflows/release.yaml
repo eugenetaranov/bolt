@@ -1,10 +1,9 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -12,16 +11,20 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # Only run on successful CI completion for tags
-    if: |
-      github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
     steps:
+      - name: Wait for CI to complete
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          running-workflow-name: 'release'
+          allowed-conclusions: success
+          wait-interval: 10
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_branch }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
