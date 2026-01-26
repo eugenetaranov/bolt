@@ -25,3 +25,5 @@ Thumbs.db
 # Local config
 .env
 .envrc
+
+.claude

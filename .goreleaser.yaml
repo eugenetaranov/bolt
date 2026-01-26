@@ -98,7 +98,7 @@ release:
     ```
 
 # Homebrew Tap
-homebrew:
+brews:
   - name: bolt
     repository:
       owner: eugenetaranov
