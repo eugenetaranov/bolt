@@ -1,0 +1,98 @@
+name: macOS Development Setup
+hosts: localhost
+connection: local
+
+vars:
+  # CLI tools
+  brew_formulae:
+    # Shell & Core
+    - bash
+    - coreutils
+    - watch
+
+    # Search & Navigation
+    - fd
+    - fzf
+    - the_silver_searcher
+
+    # Dev Tools
+    - direnv
+    - just
+    - mise
+    - pyenv
+    - git-filter-repo
+
+    # Kubernetes
+    - kubernetes-cli
+    - helm
+    - k9s
+    - kubectx
+    - stern
+    - eks-node-viewer
+
+    # Data & Files
+    - yq
+    - jq
+    - ncdu
+    - dbmate
+    - mysql-client
+
+    # Media & Documents
+    - ffmpeg
+    - tesseract
+    - tesseract-lang
+    - ocrmypdf
+    - img2pdf
+    - ghostscript
+    - pngquant
+    - qpdf
+    - unpaper
+    - jbig2enc
+
+    # Network
+    - httpie
+    - tcptraceroute
+
+    # IaC
+    - tflint
+
+  # GUI Applications
+  brew_casks:
+    # Browsers
+    - brave-browser
+    - firefox
+    - google-chrome
+
+    # Development
+    - iterm2
+    - visual-studio-code
+    - cursor
+    - jetbrains-toolbox
+
+    # Communication
+    - slack
+    - microsoft-teams
+    - signal
+    - telegram
+
+    # Productivity
+    - notion
+    - maccy
+    - cleanshot
+    - chatgpt
+
+    # Security
+    - bitwarden
+    - keeweb
+
+tasks:
+  - name: Install Homebrew formulae
+    brew:
+      name: "{{ brew_formulae }}"
+      state: present
+
+  - name: Install Homebrew casks
+    brew:
+      name: "{{ brew_casks }}"
+      state: present
+      cask: true

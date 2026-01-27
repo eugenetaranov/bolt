@@ -62,6 +62,14 @@ docker run -d --name bolt-test alpine sleep 3600 && \
 docker rm -f bolt-test
 ```
 
+**Bootstrap macOS:**
+
+```bash
+# Install dev tools, apps, and configure your Mac
+bolt run examples/playbooks/macos-setup.yaml --dry-run  # preview
+bolt run examples/playbooks/macos-setup.yaml            # apply
+```
+
 **CLI usage:**
 
 ```bash
