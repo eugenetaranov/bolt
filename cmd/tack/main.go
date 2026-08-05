@@ -267,6 +267,7 @@ func init() {
 	runCmd.Flags().StringToString("ssm-tags", nil, "EC2 tags for SSM instance discovery (key=value,...)")
 	runCmd.Flags().String("ssm-region", "", "AWS region for SSM")
 	runCmd.Flags().String("ssm-bucket", "", "S3 bucket for SSM file transfer")
+	runCmd.Flags().Bool("ssm-attach-policy", false, "Temporarily attach an IAM policy granting the instance's role S3 access to the transfer bucket, removed after (for instances without pre-provisioned S3 permissions)")
 }
 
 func runPlaybook(cmd *cobra.Command, args []string) error {
@@ -955,6 +956,13 @@ func buildConnOverrides(cmd *cobra.Command) (*executor.ConnOverrides, error) {
 		o.SSMBucket, _ = cmd.Flags().GetString("ssm-bucket")
 	} else if envBucket := os.Getenv("TACK_SSM_BUCKET"); envBucket != "" {
 		o.SSMBucket = envBucket
+	}
+
+	// SSM: attach S3 policy
+	if cmd.Flags().Changed("ssm-attach-policy") {
+		o.SSMAttachS3Policy, _ = cmd.Flags().GetBool("ssm-attach-policy")
+	} else if envAttach := os.Getenv("TACK_SSM_ATTACH_POLICY"); envAttach != "" {
+		o.SSMAttachS3Policy = envAttach == "1" || envAttach == "true" || envAttach == "yes"
 	}
 
 	// Infer connection type from protocol-specific flags

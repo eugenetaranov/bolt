@@ -47,12 +47,15 @@ groups:
     vars:
       backup_enabled: true
 
-  # SSM group — explicit instance IDs under ssm.instances
+  # SSM group — explicit instance IDs under ssm.instances. attach_s3_policy
+  # temporarily grants each instance's role S3 access for large file
+  # transfers (copy/template) when it isn't already provisioned.
   prod-app:
     connection: ssm
     ssm:
       region: us-east-1
       bucket: my-ssm-transfer-bucket
+      attach_s3_policy: true
       instances:
         - i-0abc1234567890001
         - i-0def5678901234567

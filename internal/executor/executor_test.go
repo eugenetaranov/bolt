@@ -225,6 +225,35 @@ func TestApplyOverrides_SSMRegionAndBucket(t *testing.T) {
 	}
 }
 
+func TestApplyOverrides_SSMAttachS3Policy(t *testing.T) {
+	exec := New()
+	exec.Overrides = &ConnOverrides{
+		SSMAttachS3Policy: true,
+	}
+	play := &playbook.Play{}
+
+	exec.ApplyOverrides(play)
+
+	if play.SSM == nil {
+		t.Fatal("play.SSM should not be nil")
+	}
+	if !play.SSM.AttachS3Policy {
+		t.Error("SSM.AttachS3Policy = false, want true")
+	}
+}
+
+func TestApplyOverrides_SSMAttachS3Policy_NotSet(t *testing.T) {
+	exec := New()
+	exec.Overrides = &ConnOverrides{}
+	play := &playbook.Play{}
+
+	exec.ApplyOverrides(play)
+
+	if play.SSM != nil {
+		t.Error("play.SSM should stay nil when no SSM override is set")
+	}
+}
+
 func TestApplyOverrides_SSMInstances(t *testing.T) {
 	exec := New()
 	exec.Overrides = &ConnOverrides{
@@ -503,10 +532,11 @@ func TestNeedsSudoPassword_ExplicitFlagOnly(t *testing.T) {
 
 func TestConnOverrides_SSMFields(t *testing.T) {
 	o := &ConnOverrides{
-		SSMInstances: []string{"i-111", "i-222"},
-		SSMTags:      map[string]string{"Env": "prod"},
-		SSMRegion:    "ap-southeast-1",
-		SSMBucket:    "my-bucket",
+		SSMInstances:      []string{"i-111", "i-222"},
+		SSMTags:           map[string]string{"Env": "prod"},
+		SSMRegion:         "ap-southeast-1",
+		SSMBucket:         "my-bucket",
+		SSMAttachS3Policy: true,
 	}
 
 	if len(o.SSMInstances) != 2 {
@@ -520,6 +550,9 @@ func TestConnOverrides_SSMFields(t *testing.T) {
 	}
 	if o.SSMBucket != "my-bucket" {
 		t.Errorf("SSMBucket = %q, want my-bucket", o.SSMBucket)
+	}
+	if !o.SSMAttachS3Policy {
+		t.Error("SSMAttachS3Policy = false, want true")
 	}
 }
 

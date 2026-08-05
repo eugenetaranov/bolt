@@ -625,6 +625,9 @@ func parseSSMConfig(raw map[string]any) *SSMConfig {
 			}
 		}
 	}
+	if v, ok := asBool(raw["attach_s3_policy"]); ok {
+		cfg.AttachS3Policy = v
+	}
 	return cfg
 }
 

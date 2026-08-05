@@ -44,6 +44,11 @@ type ConnOverrides struct {
 	SSMRegion    string
 	SSMBucket    string
 
+	// SSMAttachS3Policy requests temporary IAM policy attachment for S3
+	// file transfer access; true only when --ssm-attach-policy was
+	// explicitly passed on the CLI.
+	SSMAttachS3Policy bool
+
 	// ConnectionInferred is true when Connection was inferred from flags
 	// (e.g. --hosts with non-local targets implies ssh) rather than explicitly
 	// set by the user. Inferred connections can be overridden by inventory groups.
@@ -348,7 +353,7 @@ func (e *Executor) ApplyOverrides(play *playbook.Play) {
 	}
 
 	// SSM overrides
-	if o.SSMRegion != "" || o.SSMBucket != "" || len(o.SSMInstances) > 0 || len(o.SSMTags) > 0 {
+	if o.SSMRegion != "" || o.SSMBucket != "" || len(o.SSMInstances) > 0 || len(o.SSMTags) > 0 || o.SSMAttachS3Policy {
 		if play.SSM == nil {
 			play.SSM = &playbook.SSMConfig{}
 		}
@@ -357,6 +362,9 @@ func (e *Executor) ApplyOverrides(play *playbook.Play) {
 		}
 		if o.SSMBucket != "" {
 			play.SSM.Bucket = o.SSMBucket
+		}
+		if o.SSMAttachS3Policy {
+			play.SSM.AttachS3Policy = true
 		}
 		if play.Connection == "ssm" && len(play.Hosts) == 0 {
 			if len(o.SSMInstances) > 0 {
@@ -404,9 +412,10 @@ func (e *Executor) runPlay(ctx context.Context, play *playbook.Play, stats *Stat
 				}
 				if play.SSM == nil && group.SSM != nil {
 					play.SSM = &playbook.SSMConfig{
-						Region: group.SSM.Region,
-						Bucket: group.SSM.Bucket,
-						Tags:   group.SSM.Tags,
+						Region:         group.SSM.Region,
+						Bucket:         group.SSM.Bucket,
+						Tags:           group.SSM.Tags,
+						AttachS3Policy: group.SSM.AttachS3Policy,
 					}
 				}
 			}
@@ -2100,6 +2109,9 @@ func (e *Executor) GetConnector(play *playbook.Play, host string) (connector.Con
 			}
 			if play.SSM.Bucket != "" {
 				ssmOpts = append(ssmOpts, ssmconn.WithBucket(play.SSM.Bucket))
+			}
+			if play.SSM.AttachS3Policy {
+				ssmOpts = append(ssmOpts, ssmconn.WithAutoIAMPolicy())
 			}
 		}
 		return ssmconn.New(host, ssmOpts...), nil

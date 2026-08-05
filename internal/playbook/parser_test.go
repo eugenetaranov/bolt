@@ -85,6 +85,69 @@ tasks:
 	}
 }
 
+func TestParseSSMConfig(t *testing.T) {
+	yamlSrc := `
+name: Patch fleet
+connection: ssm
+hosts: [i-0abc123]
+ssm:
+  region: us-east-1
+  bucket: my-transfer-bucket
+  attach_s3_policy: true
+  tags:
+    env: production
+tasks:
+  - name: noop
+    command:
+      cmd: echo hi
+`
+	pb, err := ParseRaw([]byte(yamlSrc), "test.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pb.Plays) != 1 {
+		t.Fatalf("expected 1 play, got %d", len(pb.Plays))
+	}
+	ssm := pb.Plays[0].SSM
+	if ssm == nil {
+		t.Fatal("play.SSM should not be nil")
+	}
+	if ssm.Region != "us-east-1" {
+		t.Errorf("Region = %q, want us-east-1", ssm.Region)
+	}
+	if ssm.Bucket != "my-transfer-bucket" {
+		t.Errorf("Bucket = %q, want my-transfer-bucket", ssm.Bucket)
+	}
+	if !ssm.AttachS3Policy {
+		t.Error("AttachS3Policy = false, want true")
+	}
+	if ssm.Tags["env"] != "production" {
+		t.Errorf("Tags[env] = %q, want production", ssm.Tags["env"])
+	}
+}
+
+func TestParseSSMConfig_AttachS3PolicyDefaultsFalse(t *testing.T) {
+	yamlSrc := `
+name: Patch fleet
+connection: ssm
+hosts: [i-0abc123]
+ssm:
+  region: us-east-1
+  bucket: my-transfer-bucket
+tasks:
+  - name: noop
+    command:
+      cmd: echo hi
+`
+	pb, err := ParseRaw([]byte(yamlSrc), "test.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pb.Plays[0].SSM.AttachS3Policy {
+		t.Error("AttachS3Policy should default to false when omitted")
+	}
+}
+
 func TestParseHostsFormats(t *testing.T) {
 	tests := []struct {
 		name      string

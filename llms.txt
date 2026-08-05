@@ -729,6 +729,7 @@ Target can be a playbook YAML file or a role directory path.
 | --ssm-tags           |       | string | ""      | TACK_SSM_TAGS        |
 | --ssm-region         |       | string | ""      | TACK_SSM_REGION      |
 | --ssm-bucket         |       | string | ""      | TACK_SSM_BUCKET      |
+| --ssm-attach-policy  |       | bool   | false   | TACK_SSM_ATTACH_POLICY |
 
 `--connection` accepts URI format: `ssh://user@host:port`, `docker://container`, `local://`
 `--extra-vars` accepts `key=value` format, repeatable.

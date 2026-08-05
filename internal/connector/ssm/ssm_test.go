@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -12,12 +13,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
+	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
-	"github.com/tackhq/tack/internal/connector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tackhq/tack/internal/connector"
 )
 
 // --- Mock SSM client ---
@@ -109,6 +112,57 @@ func (m *mockEC2) DescribeInstances(ctx context.Context, params *ec2.DescribeIns
 		return m.describeInstancesFn(ctx, params)
 	}
 	return &ec2.DescribeInstancesOutput{}, nil
+}
+
+// --- Mock IAM client ---
+
+type mockIAM struct {
+	getInstanceProfileFn func(ctx context.Context, params *iam.GetInstanceProfileInput) (*iam.GetInstanceProfileOutput, error)
+	putRolePolicyFn      func(ctx context.Context, params *iam.PutRolePolicyInput) (*iam.PutRolePolicyOutput, error)
+	deleteRolePolicyFn   func(ctx context.Context, params *iam.DeleteRolePolicyInput) (*iam.DeleteRolePolicyOutput, error)
+}
+
+func (m *mockIAM) GetInstanceProfile(ctx context.Context, params *iam.GetInstanceProfileInput, _ ...func(*iam.Options)) (*iam.GetInstanceProfileOutput, error) {
+	if m.getInstanceProfileFn != nil {
+		return m.getInstanceProfileFn(ctx, params)
+	}
+	return &iam.GetInstanceProfileOutput{
+		InstanceProfile: &iamtypes.InstanceProfile{
+			Roles: []iamtypes.Role{{RoleName: aws.String("test-role")}},
+		},
+	}, nil
+}
+
+func (m *mockIAM) PutRolePolicy(ctx context.Context, params *iam.PutRolePolicyInput, _ ...func(*iam.Options)) (*iam.PutRolePolicyOutput, error) {
+	if m.putRolePolicyFn != nil {
+		return m.putRolePolicyFn(ctx, params)
+	}
+	return &iam.PutRolePolicyOutput{}, nil
+}
+
+func (m *mockIAM) DeleteRolePolicy(ctx context.Context, params *iam.DeleteRolePolicyInput, _ ...func(*iam.Options)) (*iam.DeleteRolePolicyOutput, error) {
+	if m.deleteRolePolicyFn != nil {
+		return m.deleteRolePolicyFn(ctx, params)
+	}
+	return &iam.DeleteRolePolicyOutput{}, nil
+}
+
+// instanceWithProfile returns a mockEC2 DescribeInstances response
+// describing a single instance with the given instance-profile ARN.
+func instanceWithProfile(instanceID, profileArn string) *ec2.DescribeInstancesOutput {
+	var profile *ec2types.IamInstanceProfile
+	if profileArn != "" {
+		profile = &ec2types.IamInstanceProfile{Arn: aws.String(profileArn)}
+	}
+	return &ec2.DescribeInstancesOutput{
+		Reservations: []ec2types.Reservation{
+			{
+				Instances: []ec2types.Instance{
+					{InstanceId: aws.String(instanceID), IamInstanceProfile: profile},
+				},
+			},
+		},
+	}
 }
 
 // --- Tests ---
@@ -330,6 +384,158 @@ func TestDownloadViaS3(t *testing.T) {
 	err := c.Download(context.Background(), "/opt/file", &buf)
 	require.NoError(t, err)
 	assert.Equal(t, "s3 content", buf.String())
+}
+
+func TestEnsureS3Access_Disabled(t *testing.T) {
+	// attachS3Policy not set (WithAutoIAMPolicy not passed): no clients
+	// required, ensureS3Access is a no-op.
+	c := New("i-test123")
+	require.NoError(t, c.ensureS3Access(context.Background()))
+	assert.Empty(t, c.iamAttachedRole)
+}
+
+func TestEnsureS3Access_AttachesScopedPolicyOnce(t *testing.T) {
+	iamPropagationDelay = 0 // skip the real-world propagation wait in tests
+
+	var putCount int
+	var capturedPolicy string
+	ec2mock := &mockEC2{
+		describeInstancesFn: func(_ context.Context, _ *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
+			return instanceWithProfile("i-test123", "arn:aws:iam::123456789012:instance-profile/my-profile"), nil
+		},
+	}
+	iamMock := &mockIAM{
+		getInstanceProfileFn: func(_ context.Context, params *iam.GetInstanceProfileInput) (*iam.GetInstanceProfileOutput, error) {
+			assert.Equal(t, "my-profile", aws.ToString(params.InstanceProfileName))
+			return &iam.GetInstanceProfileOutput{
+				InstanceProfile: &iamtypes.InstanceProfile{
+					Roles: []iamtypes.Role{{RoleName: aws.String("my-instance-role")}},
+				},
+			}, nil
+		},
+		putRolePolicyFn: func(_ context.Context, params *iam.PutRolePolicyInput) (*iam.PutRolePolicyOutput, error) {
+			putCount++
+			assert.Equal(t, "my-instance-role", aws.ToString(params.RoleName))
+			assert.Equal(t, iamPolicyName, aws.ToString(params.PolicyName))
+			capturedPolicy = aws.ToString(params.PolicyDocument)
+			return &iam.PutRolePolicyOutput{}, nil
+		},
+	}
+	c := New("i-test123",
+		withEC2Client(ec2mock),
+		withIAMClient(iamMock),
+		WithBucket("my-bucket"),
+		WithAutoIAMPolicy(),
+	)
+
+	require.NoError(t, c.ensureS3Access(context.Background()))
+	assert.Equal(t, "my-instance-role", c.iamAttachedRole)
+	assert.Equal(t, 1, putCount)
+
+	var doc s3TransferPolicyDocument
+	require.NoError(t, json.Unmarshal([]byte(capturedPolicy), &doc))
+	require.Len(t, doc.Statement, 1)
+	assert.Equal(t, "arn:aws:s3:::my-bucket/tack-transfer/i-test123/*", doc.Statement[0].Resource)
+	assert.ElementsMatch(t, []string{"s3:GetObject", "s3:PutObject", "s3:DeleteObject"}, doc.Statement[0].Action)
+
+	// Second call is a no-op: PutRolePolicy is not invoked again.
+	require.NoError(t, c.ensureS3Access(context.Background()))
+	assert.Equal(t, 1, putCount)
+}
+
+func TestEnsureS3Access_NoInstanceProfile(t *testing.T) {
+	ec2mock := &mockEC2{
+		describeInstancesFn: func(_ context.Context, _ *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
+			return instanceWithProfile("i-test123", ""), nil
+		},
+	}
+	c := New("i-test123",
+		withEC2Client(ec2mock),
+		withIAMClient(&mockIAM{}),
+		WithBucket("my-bucket"),
+		WithAutoIAMPolicy(),
+	)
+
+	err := c.ensureS3Access(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no IAM instance profile attached")
+	assert.Empty(t, c.iamAttachedRole)
+}
+
+func TestUploadViaS3_AutoIAMPolicy(t *testing.T) {
+	iamPropagationDelay = 0
+
+	var putObjectCalled, putRolePolicyCalled bool
+	s3mock := &mockS3{
+		putObjectFn: func(_ context.Context, _ *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
+			putObjectCalled = true
+			assert.True(t, putRolePolicyCalled, "S3 upload happened before the IAM policy was attached")
+			return &s3.PutObjectOutput{}, nil
+		},
+	}
+	ec2mock := &mockEC2{
+		describeInstancesFn: func(_ context.Context, _ *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
+			return instanceWithProfile("i-test123", "arn:aws:iam::123456789012:instance-profile/my-profile"), nil
+		},
+	}
+	iamMock := &mockIAM{
+		putRolePolicyFn: func(_ context.Context, _ *iam.PutRolePolicyInput) (*iam.PutRolePolicyOutput, error) {
+			putRolePolicyCalled = true
+			return &iam.PutRolePolicyOutput{}, nil
+		},
+	}
+	c := New("i-test123",
+		withSSMClient(&mockSSM{}),
+		withS3Client(s3mock),
+		withEC2Client(ec2mock),
+		withIAMClient(iamMock),
+		WithBucket("my-bucket"),
+		WithAutoIAMPolicy(),
+	)
+
+	err := c.Upload(context.Background(), strings.NewReader("data"), "/opt/file", 0755)
+	require.NoError(t, err)
+	assert.True(t, putObjectCalled)
+	assert.True(t, putRolePolicyCalled)
+}
+
+func TestClose_DetachesAttachedIAMPolicy(t *testing.T) {
+	var deletedRole, deletedPolicy string
+	iamMock := &mockIAM{
+		deleteRolePolicyFn: func(_ context.Context, params *iam.DeleteRolePolicyInput) (*iam.DeleteRolePolicyOutput, error) {
+			deletedRole = aws.ToString(params.RoleName)
+			deletedPolicy = aws.ToString(params.PolicyName)
+			return &iam.DeleteRolePolicyOutput{}, nil
+		},
+	}
+	c := New("i-test123", withIAMClient(iamMock))
+	c.iamAttachedRole = "my-instance-role" // simulate a prior ensureS3Access attach
+
+	require.NoError(t, c.Close())
+	assert.Equal(t, "my-instance-role", deletedRole)
+	assert.Equal(t, iamPolicyName, deletedPolicy)
+	assert.Empty(t, c.iamAttachedRole)
+}
+
+func TestClose_NoIAMPolicyAttached(t *testing.T) {
+	// No PutRolePolicy ever happened, so Close must not call DeleteRolePolicy.
+	iamMock := &mockIAM{
+		deleteRolePolicyFn: func(_ context.Context, _ *iam.DeleteRolePolicyInput) (*iam.DeleteRolePolicyOutput, error) {
+			t.Fatal("DeleteRolePolicy should not be called when nothing was attached")
+			return &iam.DeleteRolePolicyOutput{}, nil
+		},
+	}
+	c := New("i-test123", withIAMClient(iamMock))
+	require.NoError(t, c.Close())
+}
+
+func TestInstanceProfileNameFromARN(t *testing.T) {
+	name, err := instanceProfileNameFromARN("arn:aws:iam::123456789012:instance-profile/my-profile")
+	require.NoError(t, err)
+	assert.Equal(t, "my-profile", name)
+
+	_, err = instanceProfileNameFromARN("not-an-arn")
+	require.Error(t, err)
 }
 
 func TestResolveInstancesByTags(t *testing.T) {

@@ -143,6 +143,21 @@ tasks:
 
 The `bucket` field is required for file upload/download operations (copy, template modules).
 
+### File Transfer via S3
+
+Without a bucket, file transfer falls back to inline base64 over the SSM command channel, which is capped at 24 KB. Configuring `bucket` routes larger files through S3 instead: tack uploads to `s3://<bucket>/tack-transfer/<instance-id>/...` and the instance pulls (or pushes) via `aws s3 cp`, which requires the instance's IAM role to have `s3:GetObject`/`s3:PutObject` on that bucket.
+
+If instances don't already have S3 permissions provisioned, set `attach_s3_policy: true` (or `--ssm-attach-policy` / `TACK_SSM_ATTACH_POLICY=1`) to have tack temporarily attach a scoped inline IAM policy to the instance's role before the transfer and remove it afterward:
+
+```yaml
+ssm:
+  region: us-east-1
+  bucket: my-ssm-transfer-bucket
+  attach_s3_policy: true
+```
+
+The attached policy is scoped to `arn:aws:s3:::<bucket>/tack-transfer/<instance-id>/*` only — not the whole bucket — and is removed when the connection closes. This requires tack's own AWS credentials to have `iam:GetInstanceProfile`, `iam:PutRolePolicy`, and `iam:DeleteRolePolicy` on the instance's role.
+
 ### Direct Instance IDs
 
 ```yaml
@@ -163,6 +178,9 @@ tack run patch.yaml --ssm-tags env=production,role=app-server --ssm-region us-ea
 
 # Direct instance IDs
 tack run patch.yaml --ssm-instances i-0abc123,i-0def456 --ssm-region us-east-1 --ssm-bucket my-bucket
+
+# Large file transfer without pre-provisioned S3 permissions
+tack run deploy.yaml --ssm-instances i-0abc123 --ssm-bucket my-bucket --ssm-attach-policy
 ```
 
 ### Environment Variables
@@ -173,6 +191,7 @@ tack run patch.yaml --ssm-instances i-0abc123,i-0def456 --ssm-region us-east-1 -
 | `TACK_SSM_TAGS` | Comma-separated key=value tags |
 | `TACK_SSM_REGION` | AWS region |
 | `TACK_SSM_BUCKET` | S3 bucket for file transfer |
+| `TACK_SSM_ATTACH_POLICY` | Temporarily attach an S3-access IAM policy to the instance role (`1`, `true`, or `yes`) |
 
 AWS credentials use the standard SDK credential chain (env vars, shared config, IAM roles).
 

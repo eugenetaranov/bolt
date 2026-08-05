@@ -64,6 +64,14 @@ type SSMConfig struct {
 
 	// Tags selects EC2 instances by tag at runtime (mutually exclusive with Instances).
 	Tags map[string]string `yaml:"tags"`
+
+	// AttachS3Policy temporarily attaches an inline IAM policy granting the
+	// instance's role S3 access to the transfer bucket's tack-transfer/
+	// prefix for the duration of the play, removing it afterward. Use when
+	// SSM-managed instances don't already have S3 permissions provisioned —
+	// SSM's own command-output channel caps out around 20 KB, so larger
+	// file transfers (copy/template) require S3.
+	AttachS3Policy bool `yaml:"attach_s3_policy"`
 }
 
 // Play represents a single play targeting a set of hosts.
