@@ -235,7 +235,7 @@ tasks:
     sudo: false
 ```
 
-Provide the sudo password via `--sudo-password` flag, `TACK_SUDO_PASSWORD` env var, or the play-level `sudo_password` field.
+Provide the sudo password via `--sudo-password` flag, `TACK_SUDO_PASSWORD` env var, or the play-level `sudo_password` field. The interactive password prompt only appears when `-s`/`--sudo` is passed on the CLI — a playbook's own `sudo: true` does not trigger it, so passwordless sudo (NOPASSWD) keeps working without any prompt.
 
 > **Note:** Tack uses `sudo`, NOT `become`/`become_user` (those are Ansible-specific).
 

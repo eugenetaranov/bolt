@@ -87,13 +87,21 @@ type Executor struct {
 	Overrides *ConnOverrides
 
 	// PromptSudoPassword is called to prompt the user for a sudo password
-	// when tasks require sudo but no password was provided.
+	// when sudo was explicitly requested via -s/--sudo but no password was
+	// provided.
 	PromptSudoPassword func() (string, error)
 
-	// SudoNoPrompt suppresses the upfront sudo-password prompt. When set,
-	// tack runs sudo without a password; passwordless sudo (NOPASSWD) works
-	// transparently, and if the target actually requires a password, sudo
-	// itself surfaces the error. Intended for CI/non-interactive runs and
+	// SudoPromptRequested gates the upfront sudo-password prompt. It is set
+	// from the -s/--sudo CLI flag (or --sudo=true in a playbook run
+	// invoked with the flag) — playbook- or task-level `sudo: true` alone
+	// does NOT trigger an interactive prompt. Passwordless sudo (NOPASSWD)
+	// works transparently either way; if a target actually requires a
+	// password, sudo itself surfaces the error, or the caller can supply
+	// --sudo-password / TACK_SUDO_PASSWORD explicitly.
+	SudoPromptRequested bool
+
+	// SudoNoPrompt suppresses the upfront sudo-password prompt even when
+	// SudoPromptRequested is set. Intended for CI/non-interactive runs and
 	// for users who've configured passwordless sudo.
 	SudoNoPrompt bool
 
@@ -439,9 +447,7 @@ func (e *Executor) runPlay(ctx context.Context, play *playbook.Play, stats *Stat
 	}
 
 	// Prompt for sudo password before any per-host output
-	allTasks := playbook.ExpandRoleTasks(roles, play.Tasks)
-	allHandlers := playbook.ExpandRoleHandlers(roles, play.Handlers)
-	if err := e.needsSudoPassword(play, allTasks, allHandlers); err != nil {
+	if err := e.needsSudoPassword(play); err != nil {
 		return err
 	}
 
@@ -1984,40 +1990,29 @@ func (e *Executor) planHandlers(host string, tasks []*playbook.Task, taskPlan []
 	return plan
 }
 
-// needsSudoPassword checks whether any task in the play requires sudo and
-// no password has been provided yet. If so, it prompts the user. This runs
-// before any host output so the prompt appears before "PLAY <host>".
-func (e *Executor) needsSudoPassword(play *playbook.Play, tasks, handlers []*playbook.Task) error {
+// needsSudoPassword prompts for a sudo password when sudo was explicitly
+// requested via -s/--sudo on the CLI and no password has been provided yet.
+// This runs before any host output so the prompt appears before "PLAY
+// <host>".
+//
+// Playbook- or task-level `sudo: true` alone does NOT trigger the prompt:
+// passwordless sudo (NOPASSWD) works transparently, and if a target
+// actually requires a password, sudo itself surfaces the error, or the
+// caller can supply --sudo-password / TACK_SUDO_PASSWORD explicitly.
+func (e *Executor) needsSudoPassword(play *playbook.Play) error {
 	// Already have a sudo password
 	if play.SudoPassword != "" {
+		return nil
+	}
+
+	// Only prompt when the user explicitly asked for sudo on the CLI.
+	if !e.SudoPromptRequested {
 		return nil
 	}
 
 	// User explicitly opted out of the prompt (flag / env / non-TTY stdin).
 	// If sudo later needs a password, the sudo command itself will error.
 	if e.SudoNoPrompt {
-		return nil
-	}
-
-	// Check if any task or the play itself needs sudo
-	needsSudo := play.Sudo
-	if !needsSudo {
-		for _, t := range tasks {
-			if t.ShouldSudo(play.Sudo) {
-				needsSudo = true
-				break
-			}
-		}
-	}
-	if !needsSudo {
-		for _, h := range handlers {
-			if h.ShouldSudo(play.Sudo) {
-				needsSudo = true
-				break
-			}
-		}
-	}
-	if !needsSudo {
 		return nil
 	}
 

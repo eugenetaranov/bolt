@@ -40,10 +40,10 @@ import (
 	_ "github.com/tackhq/tack/internal/module/yum"
 
 	"github.com/tackhq/tack/internal/executor"
-	"github.com/tackhq/tack/internal/output"
 	"github.com/tackhq/tack/internal/generate"
 	"github.com/tackhq/tack/internal/inventory"
 	"github.com/tackhq/tack/internal/module"
+	"github.com/tackhq/tack/internal/output"
 	"github.com/tackhq/tack/internal/playbook"
 	"github.com/tackhq/tack/internal/source"
 	"github.com/tackhq/tack/internal/testrun"
@@ -104,7 +104,7 @@ func addConnectionFlags(cmd *cobra.Command) {
 	cmd.Flags().String("ssh-password", "", "SSH password (prompted if flag present with no value)")
 	cmd.Flags().Lookup("ssh-password").NoOptDefVal = ""
 	cmd.Flags().Bool("ssh-insecure", false, "Skip SSH host key verification")
-	cmd.Flags().BoolP("sudo", "s", false, "Enable sudo for all tasks")
+	cmd.Flags().BoolP("sudo", "s", false, "Enable sudo for all tasks; also gates the interactive sudo-password prompt")
 	cmd.Flags().String("sudo-password", "", "Sudo password (prompted if flag present with no value)")
 	cmd.Flags().Lookup("sudo-password").NoOptDefVal = ""
 	cmd.Flags().Bool("no-sudo-prompt", false, "Skip the upfront sudo-password prompt (for passwordless sudo / CI). Also: TACK_SUDO_NO_PROMPT=1.")
@@ -407,6 +407,10 @@ func runPlaybook(cmd *cobra.Command, args []string) error {
 		}
 		return string(passBytes), nil
 	}
+	// Only prompt for a sudo password when the user explicitly requested
+	// sudo via -s/--sudo on the CLI. Playbook- or task-level `sudo: true`
+	// alone no longer triggers an interactive prompt.
+	exec.SudoPromptRequested, _ = cmd.Flags().GetBool("sudo")
 	// Opt out of the sudo prompt when the user asked to, or when stdin isn't
 	// a TTY (CI / piped input) — prompting in that case would just hang.
 	noPromptFlag, _ := cmd.Flags().GetBool("no-sudo-prompt")

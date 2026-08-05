@@ -378,10 +378,10 @@ func TestGetConnector_SSMMinimal(t *testing.T) {
 
 func TestToStringMap(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   any
-		want    map[string]string
-		wantOK  bool
+		name   string
+		input  any
+		want   map[string]string
+		wantOK bool
 	}{
 		{
 			name:   "map[string]string",
@@ -436,50 +436,48 @@ func TestToStringMap(t *testing.T) {
 	}
 }
 
-func TestNeedsSudoPassword_NoPromptOptOut(t *testing.T) {
-	sudoTrue := true
-
+func TestNeedsSudoPassword_ExplicitFlagOnly(t *testing.T) {
 	cases := []struct {
-		name         string
-		play         *playbook.Play
-		tasks        []*playbook.Task
-		sudoNoPrompt bool
-		wantPrompted bool
+		name          string
+		play          *playbook.Play
+		sudoRequested bool
+		sudoNoPrompt  bool
+		wantPrompted  bool
 	}{
 		{
-			name:         "no sudo needed — no prompt",
-			play:         &playbook.Play{},
-			tasks:        []*playbook.Task{{Name: "t"}},
-			sudoNoPrompt: false,
-			wantPrompted: false,
+			name:          "flag not passed — no prompt",
+			play:          &playbook.Play{},
+			sudoRequested: false,
+			sudoNoPrompt:  false,
+			wantPrompted:  false,
 		},
 		{
-			name:         "play sudo true, no opt-out — prompts",
-			play:         &playbook.Play{Sudo: true},
-			tasks:        []*playbook.Task{{Name: "t"}},
-			sudoNoPrompt: false,
-			wantPrompted: true,
+			name:          "playbook sudo:true but flag not passed — no prompt",
+			play:          &playbook.Play{Sudo: true},
+			sudoRequested: false,
+			sudoNoPrompt:  false,
+			wantPrompted:  false,
 		},
 		{
-			name:         "play sudo true, opt-out set — no prompt",
-			play:         &playbook.Play{Sudo: true},
-			tasks:        []*playbook.Task{{Name: "t"}},
-			sudoNoPrompt: true,
-			wantPrompted: false,
+			name:          "flag passed — prompts",
+			play:          &playbook.Play{},
+			sudoRequested: true,
+			sudoNoPrompt:  false,
+			wantPrompted:  true,
 		},
 		{
-			name:         "task sudo true, opt-out set — no prompt",
-			play:         &playbook.Play{},
-			tasks:        []*playbook.Task{{Name: "t", Sudo: &sudoTrue}},
-			sudoNoPrompt: true,
-			wantPrompted: false,
+			name:          "flag passed, opt-out set — no prompt",
+			play:          &playbook.Play{},
+			sudoRequested: true,
+			sudoNoPrompt:  true,
+			wantPrompted:  false,
 		},
 		{
-			name:         "play already has password, opt-out irrelevant",
-			play:         &playbook.Play{Sudo: true, SudoPassword: "preset"},
-			tasks:        []*playbook.Task{{Name: "t"}},
-			sudoNoPrompt: false,
-			wantPrompted: false,
+			name:          "flag passed, play already has password — no prompt",
+			play:          &playbook.Play{SudoPassword: "preset"},
+			sudoRequested: true,
+			sudoNoPrompt:  false,
+			wantPrompted:  false,
 		},
 	}
 
@@ -487,12 +485,13 @@ func TestNeedsSudoPassword_NoPromptOptOut(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			prompted := false
 			exec := New()
+			exec.SudoPromptRequested = tc.sudoRequested
 			exec.SudoNoPrompt = tc.sudoNoPrompt
 			exec.PromptSudoPassword = func() (string, error) {
 				prompted = true
 				return "pw", nil
 			}
-			if err := exec.needsSudoPassword(tc.play, tc.tasks, nil); err != nil {
+			if err := exec.needsSudoPassword(tc.play); err != nil {
 				t.Fatalf("needsSudoPassword: %v", err)
 			}
 			if prompted != tc.wantPrompted {
