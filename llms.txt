@@ -688,6 +688,10 @@ Registered result fields: `changed`, `action` (one of `created`,
 | `tack generate`        | Capture live system state as a playbook      |
 | `tack vault init <f>`  | Create new encrypted vault file              |
 | `tack vault edit <f>`  | Edit existing encrypted vault file           |
+| `tack ssm-bucket create` | Create/converge the SSM S3 transfer bucket |
+| `tack ssm-bucket status` | Show SSM S3 transfer bucket configuration  |
+| `tack ssm-bucket delete` | Delete the SSM S3 transfer bucket (and its contents) |
+| `tack ssm-bucket verify` | Round-trip test an instance's access to the bucket |
 | `tack inventory`       | Inspect resolved inventory (--list, --host)  |
 | `tack version`         | Show version information                     |
 
@@ -759,6 +763,19 @@ Vault password resolution: `TACK_VAULT_PASSWORD` env > `--vault-password-file` >
 | Flag   | Type   | Default | Description               |
 |--------|--------|---------|---------------------------|
 | --path | string | "roles" | Base directory for role    |
+
+### SSM bucket flags
+
+| Flag              | Applies to | Type   | Default | Description                                       |
+|-------------------|------------|--------|---------|----------------------------------------------------|
+| --name            | all        | string | ""      | Bucket name (or TACK_SSM_BUCKET)                    |
+| --region          | all        | string | ""      | AWS region (or TACK_SSM_REGION)                     |
+| --kms-key-id      | create     | string | ""      | SSE-KMS key ID/alias/ARN (default: SSE-S3)          |
+| --lifecycle-days  | create     | int32  | 1       | Days before transfer objects expire                 |
+| --force           | delete     | bool   | false   | Skip the interactive confirmation prompt             |
+| --unmanaged       | delete     | bool   | false   | Allow deleting a bucket tack didn't create           |
+| --instance        | verify     | string | ""      | SSM-managed instance ID to test (required)          |
+| --attach-policy   | verify     | bool   | false   | Temporarily attach an S3-access IAM policy if needed |
 
 ---
 
@@ -1110,3 +1127,28 @@ tasks:
 ```
 
 Password resolution: `TACK_VAULT_PASSWORD` env var > `--vault-password-file` > interactive prompt.
+
+---
+
+## SSM BUCKET
+
+Create, inspect, destroy, and verify the S3 bucket used for SSM file transfer (see CONNECTORS > SSM > File Transfer via S3). Every subcommand takes `--name`/`--region` (or `TACK_SSM_BUCKET`/`TACK_SSM_REGION`).
+
+```bash
+# Create: public access blocked, encryption on, tack-transfer/ lifecycle
+# rule set, tagged ManagedBy=tack. Safe to re-run.
+tack ssm-bucket create --name my-ssm-transfer-bucket --region us-east-1
+
+# Inspect configuration
+tack ssm-bucket status --name my-ssm-transfer-bucket
+
+# Confirm an instance can upload/download through the bucket, attaching a
+# temporary IAM policy if it doesn't already have access
+tack ssm-bucket verify --name my-ssm-transfer-bucket --instance i-0abc123 --attach-policy
+
+# Delete the bucket and everything in it (objects, all versions/delete
+# markers if ever versioned, incomplete multipart uploads)
+tack ssm-bucket delete --name my-ssm-transfer-bucket
+```
+
+`delete` refuses a bucket missing the `ManagedBy=tack` tag `create` sets unless `--unmanaged` is passed, and previews object/version/delete-marker/multipart-upload counts before an interactive confirmation (skippable with `--force`).

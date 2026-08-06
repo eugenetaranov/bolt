@@ -142,6 +142,7 @@ func init() {
 	rootCmd.AddCommand(vaultCmd)
 	rootCmd.AddCommand(inventoryCmd)
 	rootCmd.AddCommand(exportCmd)
+	rootCmd.AddCommand(ssmBucketCmd)
 }
 
 // runCmd executes a playbook

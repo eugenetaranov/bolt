@@ -158,6 +158,36 @@ ssm:
 
 The attached policy is scoped to `arn:aws:s3:::<bucket>/tack-transfer/<instance-id>/*` only — not the whole bucket — and is removed when the connection closes. This requires tack's own AWS credentials to have `iam:GetInstanceProfile`, `iam:PutRolePolicy`, and `iam:DeleteRolePolicy` on the instance's role.
 
+Use `tack ssm-bucket create` to provision this bucket (with encryption, blocked public access, and a `tack-transfer/` lifecycle rule already set up) instead of creating it by hand — see [Managing the Transfer Bucket](#managing-the-transfer-bucket) below.
+
+### Managing the Transfer Bucket
+
+`tack ssm-bucket` creates, inspects, destroys, and verifies access to the S3 bucket used above. All four subcommands take `--name`/`--region` (or `TACK_SSM_BUCKET`/`TACK_SSM_REGION`):
+
+```bash
+# Create the bucket: public access blocked, encryption on, tack-transfer/
+# lifecycle rule set, tagged ManagedBy=tack. Safe to re-run.
+tack ssm-bucket create --name my-ssm-transfer-bucket --region us-east-1
+
+# SSE-KMS instead of the SSE-S3 default, and a custom expiry window
+tack ssm-bucket create --name my-bucket --kms-key-id arn:aws:kms:us-east-1:111122223333:key/abc --lifecycle-days 7
+
+# Inspect current configuration
+tack ssm-bucket status --name my-ssm-transfer-bucket
+
+# Confirm a specific instance can actually upload/download through the
+# bucket, attaching a temporary IAM policy if it doesn't already have access
+tack ssm-bucket verify --name my-ssm-transfer-bucket --instance i-0abc123 --attach-policy
+
+# Delete the bucket (and everything in it — objects, all versions and
+# delete markers if it was ever versioned, incomplete multipart uploads)
+tack ssm-bucket delete --name my-ssm-transfer-bucket
+```
+
+`delete` refuses to touch a bucket that doesn't carry the `ManagedBy=tack` tag `create` sets, unless `--unmanaged` is passed — a mistyped `--name` can't wipe an unrelated bucket. Without `--force` it previews the object/version/delete-marker/multipart-upload counts and asks for interactive confirmation first.
+
+Bucket administration needs broader AWS permissions than the transfer path itself: `s3:CreateBucket`, `s3:DeleteBucket`, `s3:PutBucketTagging`/`GetBucketTagging`, `s3:PutEncryptionConfiguration`/`GetEncryptionConfiguration`, `s3:PutBucketPublicAccessBlock`/`GetBucketPublicAccessBlock`, `s3:PutLifecycleConfiguration`/`GetLifecycleConfiguration`, `s3:GetBucketVersioning`, `s3:ListBucket`, `s3:ListBucketVersions`, `s3:ListBucketMultipartUploads`, `s3:DeleteObject`/`DeleteObjectVersion`, and `s3:AbortMultipartUpload`.
+
 ### Direct Instance IDs
 
 ```yaml
