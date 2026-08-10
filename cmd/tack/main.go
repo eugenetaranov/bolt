@@ -101,11 +101,11 @@ func addConnectionFlags(cmd *cobra.Command) {
 	cmd.Flags().String("ssh-user", "", "SSH username")
 	cmd.Flags().Int("ssh-port", 0, "SSH port")
 	cmd.Flags().String("ssh-key", "", "Path to SSH private key")
-	cmd.Flags().String("ssh-password", "", "SSH password (prompted if flag present with no value)")
+	cmd.Flags().String("ssh-password", "", "SSH password; pass as `[string]`, or omit the value to prompt interactively")
 	cmd.Flags().Lookup("ssh-password").NoOptDefVal = ""
 	cmd.Flags().Bool("ssh-insecure", false, "Skip SSH host key verification")
 	cmd.Flags().BoolP("sudo", "s", false, "Enable sudo for all tasks; also gates the interactive sudo-password prompt")
-	cmd.Flags().String("sudo-password", "", "Sudo password (prompted if flag present with no value)")
+	cmd.Flags().String("sudo-password", "", "Sudo password; pass as `[string]`, or omit the value to prompt interactively")
 	cmd.Flags().Lookup("sudo-password").NoOptDefVal = ""
 	cmd.Flags().Bool("no-sudo-prompt", false, "Skip the upfront sudo-password prompt (for passwordless sudo / CI). Also: TACK_SUDO_NO_PROMPT=1.")
 }
