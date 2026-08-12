@@ -1,6 +1,7 @@
 package playbook
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,8 +49,9 @@ config_path: /etc/test
 	require.NoError(t, os.WriteFile(filepath.Join(roleDir, "vars", "main.yaml"), []byte(varsContent), 0644))
 
 	// Test loading role
-	role, err := LoadRole("testrole", rolesDir)
+	role, cleanup, err := LoadRole(context.Background(), "testrole", rolesDir)
 	require.NoError(t, err)
+	defer cleanup()
 
 	assert.Equal(t, "testrole", role.Name)
 	assert.Equal(t, roleDir, role.Path)
@@ -74,7 +76,7 @@ config_path: /etc/test
 
 func TestLoadRoleNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, err := LoadRole("nonexistent", tmpDir)
+	_, _, err := LoadRole(context.Background(), "nonexistent", tmpDir)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -86,8 +88,9 @@ func TestLoadRoleEmptyRole(t *testing.T) {
 	roleDir := filepath.Join(rolesDir, "emptyrole")
 	require.NoError(t, os.MkdirAll(roleDir, 0755))
 
-	role, err := LoadRole("emptyrole", rolesDir)
+	role, cleanup, err := LoadRole(context.Background(), "emptyrole", rolesDir)
 	require.NoError(t, err)
+	defer cleanup()
 
 	assert.Equal(t, "emptyrole", role.Name)
 	assert.Empty(t, role.Tasks)
@@ -111,8 +114,9 @@ func TestLoadRoles(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(roleDir, "tasks", "main.yaml"), []byte(tasksContent), 0644))
 	}
 
-	roles, err := LoadRoles([]RoleRef{{Name: "role1"}, {Name: "role2"}}, rolesDir)
+	roles, cleanup, err := LoadRoles(context.Background(), []RoleRef{{Name: "role1"}, {Name: "role2"}}, rolesDir)
 	require.NoError(t, err)
+	defer cleanup()
 	require.Len(t, roles, 2)
 
 	assert.Equal(t, "role1", roles[0].Name)
@@ -120,8 +124,9 @@ func TestLoadRoles(t *testing.T) {
 }
 
 func TestLoadRolesEmpty(t *testing.T) {
-	roles, err := LoadRoles(nil, "/tmp")
+	roles, cleanup, err := LoadRoles(context.Background(), nil, "/tmp")
 	require.NoError(t, err)
+	defer cleanup()
 	assert.Nil(t, roles)
 }
 

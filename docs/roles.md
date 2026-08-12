@@ -181,3 +181,36 @@ my-project/
 └── roles/
     └── webserver/         # Found at ./roles/webserver/
 ```
+
+## Remote Roles (git / HTTPS URLs)
+
+A role entry can be a git or HTTPS URL instead of a local name, in which case Tack fetches it before the play runs — no manual cloning or `roles/` checkout required:
+
+```yaml
+roles:
+  - webserver                                              # local, from ./roles/webserver/
+  - https://github.com/org/ansible-role-nginx.git          # whole repo is the role
+  - git@github.com:org/infra-roles.git//roles/database     # a role living in a subdirectory of a repo
+```
+
+Supported reference forms (the same ones `tack run <ref>` accepts for playbooks):
+
+| Form | Example |
+|------|---------|
+| Git over HTTPS | `https://github.com/org/repo.git` |
+| Git over SSH | `git@github.com:org/repo.git` |
+| Role in a subdirectory | `<git-url>//path/to/role` |
+| Pinned to a branch/tag/commit | `<git-url>@<ref>` (before any `//path`) |
+| S3 | `s3://bucket/path/to/role` |
+
+If the repo itself *is* the role (no subdirectory), omit the `//path` — Tack treats the whole repo as the role directory. To reference a role tags-and-URL together, use the object form:
+
+```yaml
+roles:
+  - role: https://github.com/org/ansible-role-nginx.git
+    tags: [web]
+```
+
+Tack derives a short role name from the URL (the in-repo path's last segment, or the repo name if there's no subdirectory) for use in output and the `--roles` CLI filter — e.g. both examples above are addressable as `--roles ansible-role-nginx` / `--roles database`.
+
+Each remote role is fetched into a temporary directory for the duration of the play (git: `git clone --depth 1`, honoring an explicit `@ref`) and removed afterward. Local roles are unaffected and require no network access.

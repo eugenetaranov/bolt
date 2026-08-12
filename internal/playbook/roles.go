@@ -1,41 +1,162 @@
 package playbook
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/tackhq/tack/internal/source"
 )
 
-// LoadRole loads a role from the specified roles directory.
-// It looks for the role at rolesDir/name/ and loads tasks, handlers, vars, and defaults.
-func LoadRole(name, rolesDir string) (*Role, error) {
+// isRemoteRoleRef reports whether name looks like a remote source
+// reference (git, HTTPS/HTTP, or S3 URL) rather than a local filesystem
+// path or bare role name.
+func isRemoteRoleRef(name string) bool {
+	return strings.HasPrefix(name, "git@") ||
+		strings.HasPrefix(name, "s3://") ||
+		strings.HasPrefix(name, "https://") ||
+		strings.HasPrefix(name, "http://")
+}
+
+// resolveRemoteRoleSource resolves ref to a source.Source. source.Resolve
+// requires an explicit "//path" separating a git/HTTPS repo URL from an
+// in-repo path, but most role repos ARE the role with no subdirectory —
+// so on that specific failure, retry treating the whole repo as the role.
+var resolveRemoteRoleSource = func(ref string) (source.Source, error) {
+	src, err := source.Resolve(ref)
+	if err == nil {
+		return src, nil
+	}
+	if retrySrc, retryErr := source.Resolve(ref + "//."); retryErr == nil {
+		return retrySrc, nil
+	}
+	return nil, err
+}
+
+// deriveRemoteRoleName produces a short, human-readable name from a
+// remote role ref, used for Role.Name / Task.RoleName (and thus the
+// --roles CLI filter) instead of the full URL.
+func deriveRemoteRoleName(ref string) string {
+	r := ref
+	// Skip past the scheme (https://, http://) before searching for the
+	// repo//path separator, so we don't mistake the scheme's own "//" for
+	// it (mirrors internal/source.splitRepoPath's searchFrom logic).
+	searchFrom := 0
+	switch {
+	case strings.HasPrefix(r, "https://"):
+		searchFrom = len("https://")
+	case strings.HasPrefix(r, "http://"):
+		searchFrom = len("http://")
+	}
+	if idx := strings.Index(r[searchFrom:], "//"); idx >= 0 {
+		idx += searchFrom
+		if path := strings.TrimSuffix(r[idx+2:], "/"); path != "" && path != "." {
+			r = path
+		} else {
+			r = r[:idx]
+		}
+	}
+	r = strings.TrimSuffix(r, ".git")
+	if i := strings.LastIndexAny(r, "/:"); i >= 0 {
+		r = r[i+1:]
+	}
+	return r
+}
+
+// noopCleanup is used for roles that don't need any temporary directory
+// torn down (local roles).
+func noopCleanup() {}
+
+// LoadRole loads a role, fetching it first if name is a remote reference
+// (git, HTTPS/HTTP, or S3 URL); otherwise it looks for the role at
+// rolesDir/name/ as before. The returned cleanup function removes any
+// temporary directory created for a remote fetch (a no-op for local
+// roles) and must not be called until the role's files are no longer
+// needed — copy/template tasks resolve file paths against the role
+// directory at execution time, not just at load time, so cleanup should
+// be deferred for the lifetime of the play, not called right after
+// LoadRole/LoadRoles return.
+func LoadRole(ctx context.Context, name, rolesDir string) (*Role, func(), error) {
+	if isRemoteRoleRef(name) {
+		return loadRemoteRole(ctx, name)
+	}
+	return loadLocalRole(name, rolesDir)
+}
+
+// loadLocalRole resolves name to a local directory under rolesDir (or
+// relative to the playbook directory for path-like names) and loads it.
+func loadLocalRole(name, rolesDir string) (*Role, func(), error) {
 	// If the role name is a path (contains separator or starts with .),
 	// resolve relative to the playbook directory (parent of rolesDir)
 	// rather than inside the roles/ subdirectory.
 	var rolePath string
-	if filepath.IsAbs(name) {
+	switch {
+	case filepath.IsAbs(name):
 		rolePath = name
-	} else if name != filepath.Base(name) {
+	case name != filepath.Base(name):
 		// Path-like name (e.g. "../tack-roles/docker", "./custom/role")
 		rolePath = filepath.Join(filepath.Dir(rolesDir), name)
-	} else {
+	default:
 		rolePath = filepath.Join(rolesDir, name)
 	}
 
-	// Check role directory exists
 	info, err := os.Stat(rolePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("role '%s' not found at %s", name, rolePath)
+			return nil, nil, fmt.Errorf("role '%s' not found at %s", name, rolePath)
 		}
-		return nil, fmt.Errorf("error accessing role '%s': %w", name, err)
+		return nil, nil, fmt.Errorf("error accessing role '%s': %w", name, err)
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("role '%s' is not a directory", name)
+		return nil, nil, fmt.Errorf("role '%s' is not a directory", name)
 	}
 
+	role, err := buildRole(name, rolePath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return role, noopCleanup, nil
+}
+
+// loadRemoteRole fetches ref (a git, HTTPS/HTTP, or S3 URL) to a
+// temporary local directory and loads it as a role.
+func loadRemoteRole(ctx context.Context, ref string) (*Role, func(), error) {
+	src, err := resolveRemoteRoleSource(ref)
+	if err != nil {
+		return nil, nil, fmt.Errorf("role '%s': %w", ref, err)
+	}
+
+	rolePath, cleanup, err := src.Fetch(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("role '%s': failed to fetch: %w", ref, err)
+	}
+
+	info, err := os.Stat(rolePath)
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("role '%s': fetched path not found: %w", ref, err)
+	}
+	if !info.IsDir() {
+		cleanup()
+		return nil, nil, fmt.Errorf("role '%s': fetched path is not a directory (a role must be a directory, not a single file)", ref)
+	}
+
+	name := deriveRemoteRoleName(ref)
+	role, err := buildRole(name, rolePath)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return role, cleanup, nil
+}
+
+// buildRole assembles a Role from an already-resolved local directory,
+// loading its tasks, handlers, defaults, and vars.
+func buildRole(name, rolePath string) (*Role, error) {
 	role := &Role{
 		Name:     name,
 		Path:     rolePath,
@@ -149,19 +270,33 @@ func loadRoleVarsFile(path string) (map[string]any, error) {
 	return vars, nil
 }
 
-// LoadRoles loads all roles specified in the play.
-// rolesDir is the base directory to search for roles (typically ./roles relative to playbook).
-func LoadRoles(refs []RoleRef, rolesDir string) ([]*Role, error) {
+// LoadRoles loads all roles specified in the play. rolesDir is the base
+// directory to search for local roles (typically ./roles relative to the
+// playbook); refs that are remote (git, HTTPS/HTTP, or S3) URLs are
+// fetched instead. The returned cleanup function tears down every
+// temporary directory created for remote roles — see LoadRole's doc for
+// why it must be deferred for the lifetime of the play, not called right
+// after LoadRoles returns.
+func LoadRoles(ctx context.Context, refs []RoleRef, rolesDir string) ([]*Role, func(), error) {
 	if len(refs) == 0 {
-		return nil, nil
+		return nil, noopCleanup, nil
 	}
 
 	roles := make([]*Role, 0, len(refs))
-	for _, ref := range refs {
-		role, err := LoadRole(ref.Name, rolesDir)
-		if err != nil {
-			return nil, err
+	var cleanups []func()
+	cleanupAll := func() {
+		for _, c := range cleanups {
+			c()
 		}
+	}
+	for _, ref := range refs {
+		role, cleanup, err := LoadRole(ctx, ref.Name, rolesDir)
+		if err != nil {
+			cleanupAll()
+			return nil, nil, err
+		}
+		cleanups = append(cleanups, cleanup)
+
 		// Apply role-level tags to all tasks and handlers in the role
 		if len(ref.Tags) > 0 {
 			for _, task := range role.Tasks {
@@ -174,7 +309,7 @@ func LoadRoles(refs []RoleRef, rolesDir string) ([]*Role, error) {
 		roles = append(roles, role)
 	}
 
-	return roles, nil
+	return roles, cleanupAll, nil
 }
 
 // MergeRoleVars merges role defaults, role vars, and play vars in the correct precedence order.

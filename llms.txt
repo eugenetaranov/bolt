@@ -1001,7 +1001,13 @@ Usage:
 roles:
   - myrole
   - /absolute/path/to/role
+  - https://github.com/org/ansible-role-nginx.git          # git/HTTPS role URL, whole repo is the role
+  - git@github.com:org/infra-roles.git//roles/database     # role in a subdirectory
+  - role: https://github.com/org/ansible-role-nginx.git    # object form, for tags
+    tags: [web]
 ```
+
+Remote role refs accept the same forms as `tack run <ref>` (git HTTPS/SSH, `//path` for a subdirectory, `@ref` to pin a branch/tag/commit, `s3://`). Fetched into a temp dir for the play's duration and removed after; local roles need no network. The `--roles` filter matches a derived short name (repo name, or the subdirectory's last segment).
 
 Variable precedence: role vars/ > play vars > role defaults/
 

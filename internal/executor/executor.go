@@ -449,10 +449,16 @@ func (e *Executor) runPlay(ctx context.Context, play *playbook.Play, stats *Stat
 	var roles []*playbook.Role
 	if len(play.Roles) > 0 {
 		var err error
-		roles, err = playbook.LoadRoles(play.Roles, rolesDir)
+		var cleanup func()
+		roles, cleanup, err = playbook.LoadRoles(ctx, play.Roles, rolesDir)
 		if err != nil {
 			return fmt.Errorf("failed to load roles: %w", err)
 		}
+		// Role files (copy/template src) are resolved against RolePath at
+		// task-execution time, not just at load time, so cleanup must
+		// outlive the whole play — defer it here rather than calling it
+		// immediately after LoadRoles returns.
+		defer cleanup()
 	}
 
 	// Prompt for sudo password before any per-host output

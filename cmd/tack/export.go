@@ -160,10 +160,13 @@ func runExport(cmd *cobra.Command, args []string) error {
 
 	for _, play := range pb.Plays {
 		// Load roles
-		roles, err := playbook.LoadRoles(play.Roles, rolesDir)
+		roles, cleanup, err := playbook.LoadRoles(ctx, play.Roles, rolesDir)
 		if err != nil {
 			return fmt.Errorf("loading roles: %w", err)
 		}
+		// Role files (copy/template src) may be read while compiling below;
+		// defer rather than calling immediately after LoadRoles returns.
+		defer cleanup()
 
 		compiler := &export.Compiler{
 			Playbook:    pb,
