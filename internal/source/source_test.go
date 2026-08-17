@@ -164,6 +164,56 @@ func TestResolve_GitHubBrowseURL(t *testing.T) {
 	}
 }
 
+func TestResolve_GitHubBareRepoURL(t *testing.T) {
+	// The literal address-bar URL for a repo's homepage: no ".git", no
+	// "/tree/" navigation. Must resolve to the whole repo, default branch.
+	src, err := Resolve("https://github.com/user/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs, ok := src.(*GitSource)
+	if !ok {
+		t.Fatalf("expected GitSource, got %T", src)
+	}
+	if gs.RepoURL != "https://github.com/user/repo.git" {
+		t.Errorf("RepoURL = %q", gs.RepoURL)
+	}
+	if gs.Ref != "" {
+		t.Errorf("Ref = %q, want empty (default branch)", gs.Ref)
+	}
+	if gs.Path != "." {
+		t.Errorf("Path = %q, want .", gs.Path)
+	}
+}
+
+func TestResolve_GitHubBareRepoURL_TrailingSlash(t *testing.T) {
+	src, err := Resolve("https://github.com/user/repo/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs, ok := src.(*GitSource)
+	if !ok {
+		t.Fatalf("expected GitSource, got %T", src)
+	}
+	if gs.RepoURL != "https://github.com/user/repo.git" {
+		t.Errorf("RepoURL = %q", gs.RepoURL)
+	}
+}
+
+func TestResolve_GitLabBareRepoURL(t *testing.T) {
+	src, err := Resolve("https://gitlab.com/user/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs, ok := src.(*GitSource)
+	if !ok {
+		t.Fatalf("expected GitSource, got %T", src)
+	}
+	if gs.RepoURL != "https://gitlab.com/user/repo.git" {
+		t.Errorf("RepoURL = %q", gs.RepoURL)
+	}
+}
+
 func TestResolve_GitHubBrowseURL_RepoRoot(t *testing.T) {
 	src, err := Resolve("https://github.com/user/repo/tree/main")
 	if err != nil {

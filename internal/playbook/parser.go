@@ -29,19 +29,19 @@ func asBool(v any) (bool, bool) {
 
 // knownTaskFields are fields that are task directives, not module names.
 var knownTaskFields = map[string]bool{
-	"name":         true,
-	"when":         true,
-	"register":     true,
-	"notify":       true,
-	"loop":         true,
-	"with_items":   true,
-	"loop_var":     true,
+	"name":          true,
+	"when":          true,
+	"register":      true,
+	"notify":        true,
+	"loop":          true,
+	"with_items":    true,
+	"loop_var":      true,
 	"ignore_errors": true,
-	"retries":      true,
-	"delay":        true,
-	"sudo":         true,
-	"changed_when": true,
-	"failed_when":  true,
+	"retries":       true,
+	"delay":         true,
+	"sudo":          true,
+	"changed_when":  true,
+	"failed_when":   true,
 	"include":       true,
 	"include_tasks": true,
 	"vars":          true,
@@ -329,6 +329,9 @@ func parseRawPlay(raw map[string]any) (*Play, error) {
 					ref.Name = name
 				}
 				ref.Tags = parseStringOrList(r["tags"])
+				if vars, ok := r["vars"].(map[string]any); ok {
+					ref.Vars = vars
+				}
 				play.Roles = append(play.Roles, ref)
 			}
 		}

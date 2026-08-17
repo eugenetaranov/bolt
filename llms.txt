@@ -1005,13 +1005,17 @@ roles:
   - /absolute/path/to/role
   - https://github.com/org/ansible-role-nginx.git          # git/HTTPS role URL, whole repo is the role
   - git@github.com:org/infra-roles.git//roles/database     # role in a subdirectory
-  - role: https://github.com/org/ansible-role-nginx.git    # object form, for tags
+  - https://github.com/org/repo                            # bare GitHub/GitLab repo URL, pasted as-is from the browser
+  - https://github.com/org/repo/tree/main/roles/database   # GitHub/GitLab folder URL, pasted as-is from the browser
+  - role: https://github.com/org/ansible-role-nginx.git    # object form, for tags/vars
     tags: [web]
+    vars:
+      nginx_version: "1.25"                                 # per-invocation var, this role only
 ```
 
-Remote role refs accept the same forms as `tack run <ref>` (git HTTPS/SSH, `//path` for a subdirectory, `@ref` to pin a branch/tag/commit, `s3://`). Fetched into a temp dir for the play's duration and removed after; local roles need no network. The `--roles` filter matches a derived short name (repo name, or the subdirectory's last segment).
+Remote role refs accept the same forms as `tack run <ref>` (git HTTPS/SSH, `//path` for a subdirectory, `@ref` to pin a branch/tag/commit, `s3://`, or a GitHub/GitLab browse URL pasted straight from the browser — repo homepage or `/tree/<ref>/<path>`). Fetched into a temp dir for the play's duration and removed after; local roles need no network. The `--roles` filter matches a derived short name (repo name, or the subdirectory's last segment).
 
-Variable precedence: role vars/ > play vars > role defaults/
+Variable precedence (lowest to highest): role defaults/ < role vars/ (overridden by any per-invocation `vars:` on the roles: list entry) < play vars
 
 Run a role directly: `tack run roles/myrole`
 

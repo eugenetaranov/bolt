@@ -1270,6 +1270,46 @@ tasks:
 	}
 }
 
+func TestParseVarsOnRoleReference(t *testing.T) {
+	yaml := `
+hosts: localhost
+roles:
+  - webserver
+  - role: docker
+    tags: [containers]
+    vars:
+      version: "27.0"
+      channel: stable
+tasks:
+  - command:
+      cmd: echo hi
+`
+	pb, err := ParseRaw([]byte(yaml), "test.yaml")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	play := pb.Plays[0]
+	if len(play.Roles) != 2 {
+		t.Fatalf("expected 2 role refs, got %d: %v", len(play.Roles), play.Roles)
+	}
+	if play.Roles[0].Vars != nil {
+		t.Errorf("string-form role should have nil Vars, got %v", play.Roles[0].Vars)
+	}
+	docker := play.Roles[1]
+	if docker.Name != "docker" {
+		t.Fatalf("expected role 'docker', got %q", docker.Name)
+	}
+	if len(docker.Vars) != 2 {
+		t.Fatalf("expected 2 vars, got %v", docker.Vars)
+	}
+	if docker.Vars["version"] != "27.0" {
+		t.Errorf("Vars[version] = %v, want 27.0", docker.Vars["version"])
+	}
+	if docker.Vars["channel"] != "stable" {
+		t.Errorf("Vars[channel] = %v, want stable", docker.Vars["channel"])
+	}
+}
+
 func TestParseAssertTask(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1442,4 +1482,3 @@ func TestExpandShorthandLeavesAssert(t *testing.T) {
 		t.Errorf("ExpandShorthand should not set Module on assert task, got %q", task.Module)
 	}
 }
-

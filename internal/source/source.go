@@ -91,8 +91,12 @@ func splitRepoRef(repo string) (string, string) {
 	return repo, ""
 }
 
-// isGitHubURL checks if the URL is a GitHub or GitLab browse URL
-// matching the pattern: https://<host>/<owner>/<repo>/(tree|blob)/<ref>/...
+// isGitHubURL checks if ref is a GitHub or GitLab browse URL: either the
+// bare repo homepage (https://<host>/<owner>/<repo>, exactly what's in the
+// address bar when you're looking at the repo root — no ".git", no
+// "/tree/") or a folder/file page (.../(tree|blob)/<ref>/<path...>, what's
+// in the address bar after navigating into a subdirectory or file). Either
+// form can be pasted as-is as a role or playbook source.
 func isGitHubURL(ref string) bool {
 	u, err := url.Parse(ref)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
@@ -102,9 +106,23 @@ func isGitHubURL(ref string) bool {
 	if host != "github.com" && host != "gitlab.com" {
 		return false
 	}
-	segments := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	segments := browseURLSegments(u.Path)
+	if len(segments) == 2 {
+		return true // bare repo homepage
+	}
 	// Need at least: owner, repo, tree|blob, ref
 	return len(segments) >= 4 && (segments[2] == "tree" || segments[2] == "blob")
+}
+
+// browseURLSegments splits a URL path into its non-empty segments,
+// tolerating a trailing slash (e.g. ".../owner/repo/" from a browser's
+// address bar).
+func browseURLSegments(path string) []string {
+	path = strings.Trim(path, "/")
+	if path == "" {
+		return nil
+	}
+	return strings.Split(path, "/")
 }
 
 func parseGitHubURL(ref string) (*GitSource, error) {
@@ -112,15 +130,19 @@ func parseGitHubURL(ref string) (*GitSource, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid GitHub URL: %s", ref)
 	}
-	segments := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	segments := browseURLSegments(u.Path)
 	owner := segments[0]
 	repo := segments[1]
+	repoURL := fmt.Sprintf("%s://%s/%s/%s.git", u.Scheme, u.Host, owner, repo)
+	if len(segments) == 2 {
+		// Bare repo homepage: whole repo, default branch.
+		return &GitSource{RepoURL: repoURL, Path: "."}, nil
+	}
 	gitRef := segments[3]
 	path := "."
 	if len(segments) > 4 {
 		path = strings.Join(segments[4:], "/")
 	}
-	repoURL := fmt.Sprintf("%s://%s/%s/%s.git", u.Scheme, u.Host, owner, repo)
 	return &GitSource{
 		RepoURL: repoURL,
 		Ref:     gitRef,

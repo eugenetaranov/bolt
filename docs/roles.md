@@ -158,7 +158,7 @@ roles/webserver/
 Variables are merged in this order (lowest to highest priority):
 
 1. Role defaults (`defaults/main.yaml`)
-2. Role vars (`vars/main.yaml`)
+2. Role vars (`vars/main.yaml`), overridden by any per-invocation `vars:` on the `roles:` list entry (see [Tags and variables per role](#tags-and-variables-per-role))
 3. Play vars
 4. Registered variables
 
@@ -203,14 +203,32 @@ Supported reference forms (the same ones `tack run <ref>` accepts for playbooks)
 | Pinned to a branch/tag/commit | `<git-url>@<ref>` (before any `//path`) |
 | S3 | `s3://bucket/path/to/role` |
 
-If the repo itself *is* the role (no subdirectory), omit the `//path` — Tack treats the whole repo as the role directory. To reference a role tags-and-URL together, use the object form:
+If the repo itself *is* the role (no subdirectory), omit the `//path` — Tack treats the whole repo as the role directory.
+
+### Pasted straight from the browser
+
+You don't have to hand-build the `.git//path` form. Tack also accepts GitHub/GitLab URLs exactly as your browser shows them — copy the address bar and paste it in:
+
+```yaml
+roles:
+  - https://github.com/org/repo                              # repo homepage URL — whole repo is the role
+  - https://github.com/org/repo/tree/main/roles/database      # after navigating into a folder
+```
+
+Both resolve to the same git clone Tack would do with the `.git`/`.git//path` forms above; the browse URL is just parsed back into `repo` + `ref` + `path`.
+
+### Tags and variables per role
+
+To pass tags and/or variables to a role, use the object form:
 
 ```yaml
 roles:
   - role: https://github.com/org/ansible-role-nginx.git
     tags: [web]
+    vars:
+      nginx_version: "1.25"
 ```
 
-Tack derives a short role name from the URL (the in-repo path's last segment, or the repo name if there's no subdirectory) for use in output and the `--roles` CLI filter — e.g. both examples above are addressable as `--roles ansible-role-nginx` / `--roles database`.
+`vars` are per-invocation variables for that role only — a clean way to pin a version or tune behavior without forking the role or touching its `defaults/main.yaml`. They override the role's own `defaults/main.yaml` and `vars/main.yaml` (see [Variable Precedence](#variable-precedence)).
 
 Each remote role is fetched into a temporary directory for the duration of the play (git: `git clone --depth 1`, honoring an explicit `@ref`) and removed afterward. Local roles are unaffected and require no network access.

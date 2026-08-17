@@ -222,13 +222,20 @@ type AssertSpec struct {
 	Quiet bool
 }
 
-// RoleRef is a reference to a role in a play, optionally with tags.
+// RoleRef is a reference to a role in a play, optionally with tags and
+// per-invocation variables.
 type RoleRef struct {
 	// Name is the role name or path.
 	Name string
 
 	// Tags are role-level tags inherited by all tasks in the role.
 	Tags []string
+
+	// Vars are per-invocation variables passed to this role, overriding
+	// the role's own defaults/main.yaml and vars/main.yaml (but not play
+	// vars). Lets a playbook customize a role — e.g. a version pin —
+	// without forking it.
+	Vars map[string]any
 }
 
 // Role represents an Ansible-compatible role with tasks, handlers, and variables.

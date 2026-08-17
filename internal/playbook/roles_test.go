@@ -123,6 +123,36 @@ func TestLoadRoles(t *testing.T) {
 	assert.Equal(t, "role2", roles[1].Name)
 }
 
+func TestLoadRoles_InvocationVarsOverrideRoleVars(t *testing.T) {
+	tmpDir := t.TempDir()
+	rolesDir := filepath.Join(tmpDir, "roles")
+	roleDir := filepath.Join(rolesDir, "docker")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(roleDir, "defaults"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(roleDir, "vars"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(roleDir, "defaults", "main.yaml"), []byte("channel: stable\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(roleDir, "vars", "main.yaml"), []byte("version: latest\n"), 0644))
+
+	roles, cleanup, err := LoadRoles(context.Background(), []RoleRef{
+		{Name: "docker", Vars: map[string]any{"version": "27.0"}},
+	}, rolesDir)
+	require.NoError(t, err)
+	defer cleanup()
+	require.Len(t, roles, 1)
+
+	// Invocation vars (from the roles: list entry) override the role's own
+	// vars/main.yaml.
+	assert.Equal(t, "27.0", roles[0].Vars["version"])
+	// Defaults untouched by invocation vars are still visible via
+	// MergeRoleVars (invocation vars only override vars/main.yaml keys they
+	// set, not the role wholesale).
+	assert.Equal(t, "stable", roles[0].Defaults["channel"])
+
+	merged := MergeRoleVars(roles, nil)
+	assert.Equal(t, "27.0", merged["version"])
+	assert.Equal(t, "stable", merged["channel"])
+}
+
 func TestLoadRolesEmpty(t *testing.T) {
 	roles, cleanup, err := LoadRoles(context.Background(), nil, "/tmp")
 	require.NoError(t, err)

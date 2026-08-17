@@ -306,6 +306,13 @@ func LoadRoles(ctx context.Context, refs []RoleRef, rolesDir string) ([]*Role, f
 				handler.Tags = append(ref.Tags, handler.Tags...)
 			}
 		}
+
+		// Apply role-invocation vars, overriding the role's own
+		// vars/main.yaml (but still subordinate to play vars — see
+		// MergeRoleVars).
+		for k, v := range ref.Vars {
+			role.Vars[k] = v
+		}
 		roles = append(roles, role)
 	}
 
@@ -313,7 +320,8 @@ func LoadRoles(ctx context.Context, refs []RoleRef, rolesDir string) ([]*Role, f
 }
 
 // MergeRoleVars merges role defaults, role vars, and play vars in the correct precedence order.
-// Precedence (lowest to highest): role defaults < role vars < play vars
+// Precedence (lowest to highest): role defaults < role vars (vars/main.yaml,
+// overridden by any per-invocation vars: on the roles: list entry) < play vars
 func MergeRoleVars(roles []*Role, playVars map[string]any) map[string]any {
 	merged := make(map[string]any)
 
