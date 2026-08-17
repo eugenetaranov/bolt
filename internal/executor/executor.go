@@ -110,6 +110,20 @@ type Executor struct {
 	// for users who've configured passwordless sudo.
 	SudoNoPrompt bool
 
+	// PromptSSHPassword is called lazily by an SSH connector when it
+	// actually attempts password authentication (key/agent auth was
+	// unavailable or the server rejected it) and no --ssh-password /
+	// TACK_SSH_PASSWORD was provided. Unlike the sudo prompt, this needs
+	// no CLI flag to opt in — it mirrors how the ssh(1) CLI itself falls
+	// back to a password prompt. Cached across the whole run so multiple
+	// hosts needing the same password only prompt once.
+	PromptSSHPassword func() (string, error)
+
+	// SSHNoPrompt suppresses the automatic SSH password prompt fallback.
+	// Intended for CI/non-interactive runs; set automatically when stdin
+	// isn't a terminal.
+	SSHNoPrompt bool
+
 	// ResolveVaultPassword is called to obtain the vault password when
 	// a play references a vault_file and no password has been cached yet.
 	ResolveVaultPassword func() ([]byte, error)
@@ -2095,6 +2109,8 @@ func (e *Executor) GetConnector(play *playbook.Play, host string) (connector.Con
 		}
 		if effectiveSSH.Password != "" {
 			sshOpts = append(sshOpts, sshconn.WithPassword(effectiveSSH.Password))
+		} else if !e.SSHNoPrompt && e.PromptSSHPassword != nil {
+			sshOpts = append(sshOpts, sshconn.WithPasswordPrompt(e.PromptSSHPassword))
 		}
 		if effectiveSSH.HostKeyChecking != nil && !*effectiveSSH.HostKeyChecking {
 			sshOpts = append(sshOpts, sshconn.WithInsecureHostKey())

@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -165,4 +166,85 @@ func TestResolveSSHConfigNoFile(t *testing.T) {
 	assert.Equal(t, "myhost", c.hostname)
 	assert.Equal(t, "testuser", c.user)
 	assert.Equal(t, defaultPort, c.port)
+}
+
+func TestWithPasswordPrompt(t *testing.T) {
+	prompt := func() (string, error) { return "secret", nil }
+	c := New("myhost", WithPasswordPrompt(prompt))
+	assert.NotNil(t, c.passwordPrompt)
+}
+
+func TestCachedPasswordPrompt_CallsOnceAndCaches(t *testing.T) {
+	calls := 0
+	c := New("myhost", WithPasswordPrompt(func() (string, error) {
+		calls++
+		return "secret", nil
+	}))
+
+	pw1, err := c.cachedPasswordPrompt()
+	require.NoError(t, err)
+	assert.Equal(t, "secret", pw1)
+
+	pw2, err := c.cachedPasswordPrompt()
+	require.NoError(t, err)
+	assert.Equal(t, "secret", pw2)
+
+	assert.Equal(t, 1, calls, "the underlying prompt must only fire once, even across repeated calls")
+}
+
+func TestCachedPasswordPrompt_ErrorNotCached(t *testing.T) {
+	calls := 0
+	c := New("myhost", WithPasswordPrompt(func() (string, error) {
+		calls++
+		if calls == 1 {
+			return "", errors.New("prompt cancelled")
+		}
+		return "secret", nil
+	}))
+
+	_, err := c.cachedPasswordPrompt()
+	require.Error(t, err)
+
+	pw, err := c.cachedPasswordPrompt()
+	require.NoError(t, err)
+	assert.Equal(t, "secret", pw)
+	assert.Equal(t, 2, calls, "a failed prompt must not be cached, so a later call can retry")
+}
+
+func TestBuildAuthMethods_NoExplicitPasswordUsesPromptFallback(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SSH_AUTH_SOCK", "")
+
+	c := New("myhost", WithPasswordPrompt(func() (string, error) { return "secret", nil }))
+	methods := c.buildAuthMethods()
+
+	require.Len(t, methods, 1, "the password-prompt fallback should be the only auth method when no key/agent/explicit password is available")
+}
+
+func TestBuildAuthMethods_ExplicitPasswordSkipsPromptFallback(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SSH_AUTH_SOCK", "")
+
+	calls := 0
+	c := New("myhost",
+		WithPassword("explicit-secret"),
+		WithPasswordPrompt(func() (string, error) {
+			calls++
+			return "should-not-be-used", nil
+		}),
+	)
+	methods := c.buildAuthMethods()
+
+	require.Len(t, methods, 1, "an explicit password must be used instead of the prompt fallback, not alongside it")
+	assert.Equal(t, 0, calls, "buildAuthMethods must not invoke the prompt when an explicit password is set")
+}
+
+func TestBuildAuthMethods_NoPasswordNoPromptNoAuthMethods(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SSH_AUTH_SOCK", "")
+
+	c := New("myhost")
+	methods := c.buildAuthMethods()
+
+	assert.Empty(t, methods, "with no key, no agent, no explicit password, and no prompt fallback configured, there should be no auth methods")
 }

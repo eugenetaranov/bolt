@@ -104,6 +104,7 @@ func addConnectionFlags(cmd *cobra.Command) {
 	cmd.Flags().String("ssh-password", "", "SSH password; pass as `[string]`, or omit the value to prompt interactively")
 	cmd.Flags().Lookup("ssh-password").NoOptDefVal = ""
 	cmd.Flags().Bool("ssh-insecure", false, "Skip SSH host key verification")
+	cmd.Flags().Bool("no-ssh-prompt", false, "Skip the automatic SSH password prompt fallback when key/agent auth fails (for CI / passwordless-only hosts). Also: TACK_SSH_NO_PROMPT=1.")
 	cmd.Flags().BoolP("sudo", "s", false, "Enable sudo for all tasks; also gates the interactive sudo-password prompt")
 	cmd.Flags().String("sudo-password", "", "Sudo password; pass as `[string]`, or omit the value to prompt interactively")
 	cmd.Flags().Lookup("sudo-password").NoOptDefVal = ""
@@ -419,6 +420,29 @@ func runPlaybook(cmd *cobra.Command, args []string) error {
 	envNoPrompt := os.Getenv("TACK_SUDO_NO_PROMPT")
 	envOptOut := envNoPrompt == "1" || envNoPrompt == "true" || envNoPrompt == "yes"
 	exec.SudoNoPrompt = noPromptFlag || envOptOut || autoApprove || !term.IsTerminal(int(syscall.Stdin))
+	// SSH password fallback: prompted lazily, at most once per run, only
+	// if a connector actually needs it (key/agent auth unavailable or
+	// rejected) — see internal/connector/ssh's WithPasswordPrompt.
+	var cachedSSHPassword string
+	var sshPasswordCached bool
+	exec.PromptSSHPassword = func() (string, error) {
+		if sshPasswordCached {
+			return cachedSSHPassword, nil
+		}
+		fmt.Fprint(os.Stderr, "SSH password: ")
+		passBytes, err := term.ReadPassword(int(syscall.Stdin))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", err
+		}
+		cachedSSHPassword = string(passBytes)
+		sshPasswordCached = true
+		return cachedSSHPassword, nil
+	}
+	noSSHPromptFlag, _ := cmd.Flags().GetBool("no-ssh-prompt")
+	envNoSSHPrompt := os.Getenv("TACK_SSH_NO_PROMPT")
+	envSSHOptOut := envNoSSHPrompt == "1" || envNoSSHPrompt == "true" || envNoSSHPrompt == "yes"
+	exec.SSHNoPrompt = noSSHPromptFlag || envSSHOptOut || autoApprove || !term.IsTerminal(int(syscall.Stdin))
 	// Vault password resolution: env > file > prompt (D-01)
 	vaultPwFile, _ := cmd.Flags().GetString("vault-password-file")
 	if envPw := os.Getenv("TACK_VAULT_PASSWORD"); envPw != "" {

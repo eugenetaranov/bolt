@@ -716,6 +716,7 @@ Target can be a playbook YAML file or a role directory path.
 | --hosts              |       | string | ""      | TACK_HOSTS           |
 | --sudo               | -s    | bool   | false   | -                    |
 | --sudo-password      |       | string | ""      | TACK_SUDO_PASSWORD   |
+| --no-sudo-prompt     |       | bool   | false   | TACK_SUDO_NO_PROMPT  |
 | --inventory          | -i    | string | ""      | -  (repeatable)      |
 | --inventory-timeout  |       | int    | 30      | -                    |
 | --extra-vars         | -e    | string | ""      | -                    |
@@ -728,6 +729,7 @@ Target can be a playbook YAML file or a role directory path.
 | --ssh-key            |       | string | ""      | TACK_SSH_KEY         |
 | --ssh-password       |       | string | ""      | TACK_SSH_PASSWORD    |
 | --ssh-insecure       |       | bool   | false   | TACK_SSH_INSECURE    |
+| --no-ssh-prompt      |       | bool   | false   | TACK_SSH_NO_PROMPT   |
 | --vault-password-file|       | string | ""      | -                    |
 | --ssm-instances      |       | string | ""      | TACK_SSM_INSTANCES   |
 | --ssm-tags           |       | string | ""      | TACK_SSM_TAGS        |
@@ -805,7 +807,7 @@ ssh:
   host_key_checking: true
 ```
 
-Authentication priority: explicit key > SSH agent > default keys (~/.ssh/id_ed25519, id_rsa, id_ecdsa) > password.
+Authentication priority: explicit key > SSH agent > default keys (~/.ssh/id_ed25519, id_rsa, id_ecdsa) > password. If key/agent auth is unavailable or rejected and no password was given (`--ssh-password`/`TACK_SSH_PASSWORD`/`ssh.password`), Tack prompts for one automatically — no flag needed, at most once per run. Disable with `--no-ssh-prompt`/`TACK_SSH_NO_PROMPT=1` (auto-disabled when stdin isn't a TTY or --auto-approve is set).
 
 File transfers use SFTP. When sudo is enabled and user is not root, files upload
 to /tmp first then move via sudo.

@@ -103,6 +103,17 @@ tack run playbook.yaml --hosts myserver
 tack run playbook.yaml --hosts web1 --ssh-user deploy
 ```
 
+### Password Prompt Fallback
+
+If key/agent authentication isn't available or the server rejects it, and no password was supplied via `--ssh-password`/`TACK_SSH_PASSWORD`/`ssh.password`, Tack automatically falls back to an interactive password prompt — no flag needed, mirroring how the `ssh` CLI itself behaves. The prompt only fires if it's actually needed (key-based auth succeeding never triggers it), and only once per run even across multiple hosts.
+
+```bash
+# No --ssh-password needed: prompts automatically if key/agent auth fails
+tack run playbook.yaml --hosts web1 --ssh-user deploy
+```
+
+Disable the fallback with `--no-ssh-prompt` (or `TACK_SSH_NO_PROMPT=1`) for CI/non-interactive runs where a hang-on-prompt would be worse than a clear auth-failure error — automatically disabled whenever stdin isn't a terminal or `--auto-approve`/`-y` is set, so this is mainly for explicit opt-out in scripts that do have a TTY.
+
 ### Environment Variables
 
 | Variable | Description |
@@ -114,6 +125,7 @@ tack run playbook.yaml --hosts web1 --ssh-user deploy
 | `TACK_SSH_KEY` | Path to SSH private key |
 | `TACK_SSH_PASSWORD` | SSH password |
 | `TACK_SSH_INSECURE` | Skip host key verification (`1`, `true`, or `yes`) |
+| `TACK_SSH_NO_PROMPT` | Disable the automatic SSH password prompt fallback (`1`, `true`, or `yes`) |
 
 ## SSM Connector
 

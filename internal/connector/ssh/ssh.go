@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tackhq/tack/internal/connector"
 	sshconfig "github.com/kevinburke/ssh_config"
 	"github.com/pkg/sftp"
+	"github.com/tackhq/tack/internal/connector"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -47,6 +47,15 @@ type Connector struct {
 	sudo            bool
 	sudoPassword    string
 	insecureHostKey bool
+
+	// passwordPrompt, if set, is called lazily to obtain a password for
+	// SSH auth -- only invoked by the ssh library itself when it actually
+	// attempts password authentication (i.e. key/agent auth wasn't
+	// available or the server rejected it), never eagerly. Ignored when
+	// password is already set explicitly.
+	passwordPrompt   func() (string, error)
+	promptedPassword string
+	promptedOK       bool
 
 	client       *ssh.Client
 	sftpClient   *sftp.Client
@@ -81,6 +90,17 @@ func WithKeyFile(path string) Option {
 func WithPassword(password string) Option {
 	return func(c *Connector) {
 		c.password = password
+	}
+}
+
+// WithPasswordPrompt sets a lazy fallback password source, used only if
+// no explicit password is set (WithPassword) and the SSH library itself
+// attempts password authentication -- i.e. key/agent auth was
+// unavailable or the server rejected it. The prompt fires at most once
+// per connector, even if the library calls back more than once.
+func WithPasswordPrompt(prompt func() (string, error)) Option {
+	return func(c *Connector) {
+		c.passwordPrompt = prompt
 	}
 }
 
@@ -292,7 +312,6 @@ func (c *Connector) Upload(ctx context.Context, src io.Reader, dst string, mode 
 	return nil
 }
 
-
 // Download copies content from a remote file at src to dst using SFTP.
 func (c *Connector) Download(ctx context.Context, src string, dst io.Writer) error {
 	if c.client == nil {
@@ -457,12 +476,33 @@ func (c *Connector) buildAuthMethods() []ssh.AuthMethod {
 		}
 	}
 
-	// Password auth (always available if set)
+	// Password auth: explicit password if set, otherwise a lazy prompt
+	// fallback -- the ssh library only invokes it if key/agent auth was
+	// unavailable or the server rejected it, so it never prompts when
+	// key-based auth actually works.
 	if c.password != "" {
 		methods = append(methods, ssh.Password(c.password))
+	} else if c.passwordPrompt != nil {
+		methods = append(methods, ssh.PasswordCallback(c.cachedPasswordPrompt))
 	}
 
 	return methods
+}
+
+// cachedPasswordPrompt calls passwordPrompt at most once per connector,
+// caching the result (or the error) for any subsequent calls the ssh
+// library makes within the same handshake.
+func (c *Connector) cachedPasswordPrompt() (string, error) {
+	if c.promptedOK {
+		return c.promptedPassword, nil
+	}
+	pw, err := c.passwordPrompt()
+	if err != nil {
+		return "", err
+	}
+	c.promptedPassword = pw
+	c.promptedOK = true
+	return pw, nil
 }
 
 // sshAgentAuth returns an SSH agent auth method if SSH_AUTH_SOCK is available.
