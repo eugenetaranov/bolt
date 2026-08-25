@@ -237,3 +237,16 @@ func TestColorDisabled(t *testing.T) {
 		t.Error("CLICOLOR=1 should not disable color")
 	}
 }
+
+func TestTagsFlag_Shorthand(t *testing.T) {
+	f := runCmd.Flags().Lookup("tags")
+	if f == nil {
+		t.Fatal("expected --tags flag on run command")
+	}
+	if f.Shorthand != "t" {
+		t.Errorf("expected -t shorthand for --tags, got %q", f.Shorthand)
+	}
+	if runCmd.Flags().ShorthandLookup("t") == nil {
+		t.Error("-t should be resolvable")
+	}
+}

@@ -276,7 +276,7 @@ func init() {
 	// Run-specific flags can be added here
 	runCmd.Flags().StringArrayP("inventory", "i", nil, "Inventory source (YAML, executable, or plugin config). Can be specified multiple times.")
 	runCmd.Flags().StringSliceP("extra-vars", "e", nil, "Extra variables (key=value)")
-	runCmd.Flags().StringSlice("tags", nil, "Only run tasks with these tags")
+	runCmd.Flags().StringSliceP("tags", "t", nil, "Only run tasks with these tags")
 	runCmd.Flags().StringSlice("skip-tags", nil, "Skip tasks with these tags")
 	runCmd.Flags().StringSliceP("roles", "r", nil, "Only run tasks from these roles")
 	// Connection override flags
