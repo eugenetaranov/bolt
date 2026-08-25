@@ -32,6 +32,7 @@ import (
 	_ "github.com/tackhq/tack/internal/module/file"
 	_ "github.com/tackhq/tack/internal/module/git"
 	_ "github.com/tackhq/tack/internal/module/group"
+	_ "github.com/tackhq/tack/internal/module/iptables"
 	_ "github.com/tackhq/tack/internal/module/lineinfile"
 	_ "github.com/tackhq/tack/internal/module/systemd"
 	_ "github.com/tackhq/tack/internal/module/template"
