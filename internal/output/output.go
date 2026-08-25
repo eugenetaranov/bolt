@@ -272,6 +272,16 @@ func resolveStatus(status string) statusDisplay {
 // TaskResult prints the task result in a single line.
 // Format: [status] module | host | task name
 func (o *Output) TaskResult(name, status string, changed bool, message string, tags []string) {
+	// Skipped tasks are hidden during apply unless verbose (consistent with the
+	// plan). The RECAP still counts them.
+	if strings.HasPrefix(status, "skipped") && !o.verbose && !o.debug {
+		if o.spin != nil {
+			o.stopSpinner()
+			fmt.Fprint(o.w, "\r\033[K")
+		}
+		return
+	}
+
 	sd := resolveStatus(status)
 	suffix := o.tagSuffix(tags)
 

@@ -108,10 +108,10 @@ func TestTaskResult(t *testing.T) {
 			wantIn:   []string{"✓", "Changed Task"},
 		},
 		{
-			name:     "skipped status",
+			name:     "skipped status (shown with debug)",
 			taskName: "Skipped Task",
 			status:   "skipped",
-			debug:    false,
+			debug:    true, // skipped is hidden by default; debug/verbose reveals it
 			message:  "",
 			wantIn:   []string{"○", "Skipped Task"},
 		},
@@ -236,10 +236,10 @@ type mockStats struct {
 	duration                     time.Duration
 }
 
-func (m *mockStats) GetOK() int              { return m.ok }
-func (m *mockStats) GetChanged() int         { return m.changed }
-func (m *mockStats) GetFailed() int          { return m.failed }
-func (m *mockStats) GetSkipped() int         { return m.skipped }
+func (m *mockStats) GetOK() int                 { return m.ok }
+func (m *mockStats) GetChanged() int            { return m.changed }
+func (m *mockStats) GetFailed() int             { return m.failed }
+func (m *mockStats) GetSkipped() int            { return m.skipped }
 func (m *mockStats) GetDuration() time.Duration { return m.duration }
 
 func TestPlaybookEnd(t *testing.T) {
@@ -474,12 +474,12 @@ func TestDisplayPlan_NewFile(t *testing.T) {
 	o.SetDiff(true)
 
 	tasks := []PlannedTask{{
-		Name:       "Create config",
-		Module:     "copy",
-		Status:     "will_change",
-		Params:     map[string]any{"dest": "/etc/new.conf"},
+		Name:        "Create config",
+		Module:      "copy",
+		Status:      "will_change",
+		Params:      map[string]any{"dest": "/etc/new.conf"},
 		NewChecksum: "abc123",
-		NewContent: "server=localhost\nport=8080\n",
+		NewContent:  "server=localhost\nport=8080\n",
 	}}
 	o.DisplayPlan(tasks, false)
 	out := buf.String()
@@ -659,5 +659,32 @@ func TestPromptApproval_NoInputReturnsFalse(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "Apply these changes to 4 hosts (web1, web2, web3, web4)?") {
 		t.Errorf("prompt should contain multi-host target; got %q", buf.String())
+	}
+}
+
+// TestTaskResult_SkippedHidden verifies skipped task results are hidden during
+// apply by default and revealed with verbose/debug.
+func TestTaskResult_SkippedHidden(t *testing.T) {
+	render := func(status string, verbose, debug bool) string {
+		var buf bytes.Buffer
+		o := New(&buf)
+		o.SetColor(false)
+		o.SetVerbose(verbose)
+		o.SetDebug(debug)
+		o.TaskResult("Some Task", status, false, "reason", nil)
+		return buf.String()
+	}
+
+	for _, s := range []string{"skipped", "skipped (tag)", "skipped (role)"} {
+		if got := render(s, false, false); got != "" {
+			t.Errorf("%q should be hidden by default, got %q", s, got)
+		}
+		if got := render(s, true, false); !strings.Contains(got, "Some Task") {
+			t.Errorf("%q should be shown with verbose, got %q", s, got)
+		}
+	}
+	// Non-skipped results are always shown.
+	if got := render("changed", false, false); !strings.Contains(got, "Some Task") {
+		t.Errorf("changed task must always show, got %q", got)
 	}
 }
