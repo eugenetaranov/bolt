@@ -26,6 +26,39 @@ func (m *Module) Name() string {
 	return "template"
 }
 
+// Description returns a short summary of the template module.
+func (m *Module) Description() string {
+	return "Render a template with play/task variables and copy the result to the target."
+}
+
+// Parameters returns the parameter documentation for the template module.
+func (m *Module) Parameters() []module.ParamDoc {
+	return []module.ParamDoc{
+		{Name: "src", Type: "string", Required: true, Description: "Template source path on the controller"},
+		{Name: "dest", Type: "string", Required: true, Description: "Destination path on the target"},
+		{Name: "mode", Type: "string", Default: "0644", Description: "File permissions in octal"},
+		{Name: "owner", Type: "string", Description: "Owner username"},
+		{Name: "group", Type: "string", Description: "Group name"},
+		{Name: "backup", Type: "bool", Default: "false", Description: "Create a backup before overwriting"},
+	}
+}
+
+// Example returns a usage example for the template module.
+func (m *Module) Example() string {
+	return `- name: Render a config template
+  template:
+    src: templates/app.conf.j2
+    dest: /etc/app/app.conf
+    owner: root
+    mode: "0644"`
+}
+
+// Ensure Module implements the documentation interfaces.
+var (
+	_ module.Describer = (*Module)(nil)
+	_ module.Exampler  = (*Module)(nil)
+)
+
 // Run executes the template module.
 //
 // Parameters:

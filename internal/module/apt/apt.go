@@ -32,6 +32,15 @@ func (m *Module) Name() string {
 	return "apt"
 }
 
+// Example returns a usage example for the apt module.
+func (m *Module) Example() string {
+	return `- name: Install nginx
+  apt:
+    name: nginx
+    state: present
+    update_cache: true`
+}
+
 // Run executes the apt module.
 //
 // Parameters:

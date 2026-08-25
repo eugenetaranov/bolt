@@ -24,6 +24,16 @@ func (m *Module) Name() string {
 	return "user"
 }
 
+// Example returns a usage example for the user module.
+func (m *Module) Example() string {
+	return `- name: Ensure a user exists
+  user:
+    name: deploy
+    state: present
+    shell: /bin/bash
+    groups: [sudo]`
+}
+
 // userInfo holds the current state of a user.
 type userInfo struct {
 	Exists bool

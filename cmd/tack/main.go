@@ -646,8 +646,9 @@ Examples:
 			return nil
 		}
 
+		params := desc.Parameters()
 		fmt.Printf("Module: %s\n\n  %s\n\nParameters:\n\n", name, desc.Description())
-		for _, p := range desc.Parameters() {
+		for _, p := range params {
 			req := ""
 			if p.Required {
 				req = " (required)"
@@ -659,8 +660,54 @@ Examples:
 			fmt.Printf("  %-20s %s%s%s\n", p.Name, p.Description, req, def)
 			fmt.Printf("  %-20s type: %s\n\n", "", p.Type)
 		}
+
+		example := moduleExample(name, mod, params)
+		fmt.Printf("Example:\n\n")
+		for _, line := range strings.Split(strings.TrimRight(example, "\n"), "\n") {
+			fmt.Printf("  %s\n", line)
+		}
 		return nil
 	},
+}
+
+// moduleExample returns a usage snippet for a module: the module's curated
+// Example() when it implements module.Exampler, otherwise a minimal snippet
+// auto-generated from its required parameters.
+func moduleExample(name string, mod module.Module, params []module.ParamDoc) string {
+	if ex, ok := mod.(module.Exampler); ok {
+		if s := strings.TrimSpace(ex.Example()); s != "" {
+			return s
+		}
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "- name: Example %s task\n", name)
+	fmt.Fprintf(&b, "  %s:\n", name)
+	wrote := false
+	for _, p := range params {
+		if !p.Required {
+			continue
+		}
+		fmt.Fprintf(&b, "    %s: %s\n", p.Name, examplePlaceholder(p))
+		wrote = true
+	}
+	if !wrote {
+		fmt.Fprintf(&b, "    # see parameters above\n")
+	}
+	return b.String()
+}
+
+// examplePlaceholder returns a placeholder value for a parameter based on its
+// declared type.
+func examplePlaceholder(p module.ParamDoc) string {
+	switch {
+	case strings.HasPrefix(p.Type, "bool"):
+		return "true"
+	case strings.HasPrefix(p.Type, "int"):
+		return "0"
+	default:
+		return fmt.Sprintf("<%s>", p.Name)
+	}
 }
 
 // generateCmd captures live system resources and outputs a playbook.

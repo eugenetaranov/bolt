@@ -31,6 +31,37 @@ func (m *Module) Name() string {
 	return "brew"
 }
 
+// Description returns a short summary of the brew module.
+func (m *Module) Description() string {
+	return "Manage Homebrew packages on macOS using brew."
+}
+
+// Parameters returns the parameter documentation for the brew module.
+func (m *Module) Parameters() []module.ParamDoc {
+	return []module.ParamDoc{
+		{Name: "name", Type: "string|[]string", Description: "Package name(s) to manage"},
+		{Name: "state", Type: "string", Default: "present", Description: "Desired state: present, absent, latest"},
+		{Name: "cask", Type: "bool", Default: "false", Description: "Install as a cask (GUI app) instead of a formula"},
+		{Name: "upgrade_all", Type: "bool", Default: "false", Description: "Upgrade all installed packages"},
+		{Name: "update_homebrew", Type: "bool", Default: "false", Description: "Run brew update before operations"},
+		{Name: "options", Type: "[]string", Description: "Additional options to pass to brew install"},
+	}
+}
+
+// Example returns a usage example for the brew module.
+func (m *Module) Example() string {
+	return `- name: Install ripgrep
+  brew:
+    name: ripgrep
+    state: present`
+}
+
+// Ensure Module implements the documentation interfaces.
+var (
+	_ module.Describer = (*Module)(nil)
+	_ module.Exampler  = (*Module)(nil)
+)
+
 // Run executes the brew module.
 //
 // Parameters:

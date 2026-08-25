@@ -24,6 +24,15 @@ func (m *Module) Name() string {
 	return "lineinfile"
 }
 
+// Example returns a usage example for the lineinfile module.
+func (m *Module) Example() string {
+	return `- name: Ensure a line is present
+  lineinfile:
+    path: /etc/sysctl.conf
+    line: net.ipv4.ip_forward=1
+    regexp: "^net.ipv4.ip_forward="`
+}
+
 // Run executes the lineinfile module.
 func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[string]any) (*module.Result, error) {
 	path, err := module.RequireString(params, "path")

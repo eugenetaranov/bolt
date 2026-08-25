@@ -88,6 +88,14 @@ type Describer interface {
 	Parameters() []ParamDoc
 }
 
+// Exampler is an optional interface for modules that provide a usage example.
+// Example returns a ready-to-paste YAML task snippet (a single list item, e.g.
+// an "- name: ..." block followed by the module's params) shown by the
+// `tack module <name>` command.
+type Exampler interface {
+	Example() string
+}
+
 // CheckResult describes what a module would do without making changes.
 type CheckResult struct {
 	WouldChange bool

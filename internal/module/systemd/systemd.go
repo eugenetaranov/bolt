@@ -22,6 +22,37 @@ func (m *Module) Name() string {
 	return "systemd"
 }
 
+// Description returns a short summary of the systemd module.
+func (m *Module) Description() string {
+	return "Manage systemd services: state (started/stopped/restarted/reloaded) and enablement."
+}
+
+// Parameters returns the parameter documentation for the systemd module.
+func (m *Module) Parameters() []module.ParamDoc {
+	return []module.ParamDoc{
+		{Name: "name", Type: "string", Required: true, Description: "Service unit name"},
+		{Name: "state", Type: "string", Description: "Desired state: started, stopped, restarted, reloaded"},
+		{Name: "enabled", Type: "bool", Description: "Whether the service should start on boot"},
+		{Name: "masked", Type: "bool", Description: "Whether the service should be masked"},
+		{Name: "daemon_reload", Type: "bool", Default: "false", Description: "Run daemon-reload before applying"},
+	}
+}
+
+// Example returns a usage example for the systemd module.
+func (m *Module) Example() string {
+	return `- name: Enable and start nginx
+  systemd:
+    name: nginx
+    state: started
+    enabled: true`
+}
+
+// Ensure Module implements the documentation interfaces.
+var (
+	_ module.Describer = (*Module)(nil)
+	_ module.Exampler  = (*Module)(nil)
+)
+
 // Run executes the systemd module.
 //
 // Parameters:

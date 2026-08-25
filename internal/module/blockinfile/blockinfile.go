@@ -26,6 +26,17 @@ func (m *Module) Name() string {
 	return "blockinfile"
 }
 
+// Example returns a usage example for the blockinfile module.
+func (m *Module) Example() string {
+	return `- name: Manage a config block
+  blockinfile:
+    path: /etc/ssh/sshd_config
+    marker: "# {mark} TACK MANAGED"
+    block: |
+      Match User deploy
+        PasswordAuthentication no`
+}
+
 // Run executes the blockinfile module.
 func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[string]any) (*module.Result, error) {
 	path, err := module.RequireString(params, "path")

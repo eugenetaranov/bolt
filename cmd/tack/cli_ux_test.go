@@ -108,12 +108,35 @@ func TestDescriber_FileImplements(t *testing.T) {
 	}
 }
 
-func TestDescriber_CommandDoesNotImplement(t *testing.T) {
+func TestDescriber_CommandImplements(t *testing.T) {
 	mod := module.Get("command")
 	if mod == nil {
 		t.Fatal("command module not registered")
 	}
-	if _, ok := mod.(module.Describer); ok {
-		t.Fatal("command module should not implement Describer yet")
+	if _, ok := mod.(module.Describer); !ok {
+		t.Fatal("command module does not implement Describer")
+	}
+}
+
+// TestAllModulesDocumented guarantees every registered module exposes both
+// documentation (Describer) and a usage example (Exampler) so that
+// `tack module <name>` always shows a schema and a sample.
+func TestAllModulesDocumented(t *testing.T) {
+	for _, name := range module.List() {
+		mod := module.Get(name)
+		if _, ok := mod.(module.Describer); !ok {
+			t.Errorf("module %q does not implement Describer", name)
+		}
+		ex, ok := mod.(module.Exampler)
+		if !ok {
+			t.Errorf("module %q does not implement Exampler", name)
+			continue
+		}
+		sample := strings.TrimSpace(ex.Example())
+		if sample == "" {
+			t.Errorf("module %q returns an empty Example()", name)
+		} else if !strings.HasPrefix(sample, "- ") {
+			t.Errorf("module %q Example() should be a YAML task list item starting with '- ', got: %q", name, sample)
+		}
 	}
 }

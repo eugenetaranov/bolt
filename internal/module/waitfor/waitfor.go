@@ -26,6 +26,16 @@ func (m *Module) Name() string {
 	return "wait_for"
 }
 
+// Example returns a usage example for the wait_for module.
+func (m *Module) Example() string {
+	return `- name: Wait for the web port
+  wait_for:
+    type: port
+    host: localhost
+    port: 443
+    timeout: 60`
+}
+
 // checkResult holds the outcome of a single condition check.
 type checkResult struct {
 	success bool

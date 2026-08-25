@@ -23,6 +23,16 @@ func (m *Module) Name() string {
 	return "cron"
 }
 
+// Example returns a usage example for the cron module.
+func (m *Module) Example() string {
+	return `- name: Nightly backup
+  cron:
+    name: nightly-backup
+    job: /usr/local/bin/backup.sh
+    hour: "2"
+    minute: "0"`
+}
+
 // config holds resolved, validated parameters for one invocation.
 type config struct {
 	name        string

@@ -26,6 +26,44 @@ func (m *Module) Name() string {
 	return "copy"
 }
 
+// Description returns a short summary of the copy module.
+func (m *Module) Description() string {
+	return "Copy a file to the target from a controller source or inline content."
+}
+
+// Parameters returns the parameter documentation for the copy module.
+func (m *Module) Parameters() []module.ParamDoc {
+	return []module.ParamDoc{
+		{Name: "dest", Type: "string", Required: true, Description: "Destination path on the target"},
+		{Name: "src", Type: "string", Description: "Source file path on the controller (mutually exclusive with content)"},
+		{Name: "content", Type: "string", Description: "Inline content to write (mutually exclusive with src)"},
+		{Name: "mode", Type: "string", Default: "0644", Description: "File permissions in octal"},
+		{Name: "owner", Type: "string", Description: "Owner username"},
+		{Name: "group", Type: "string", Description: "Group name"},
+		{Name: "backup", Type: "bool", Default: "false", Description: "Create a backup before overwriting"},
+		{Name: "force", Type: "bool", Default: "true", Description: "Overwrite even if the destination exists"},
+		{Name: "create_dirs", Type: "bool", Default: "false", Description: "Create parent directories if needed"},
+		{Name: "validate", Type: "string", Description: "Command to validate the file before finalizing (%s = temp path)"},
+	}
+}
+
+// Example returns a usage example for the copy module.
+func (m *Module) Example() string {
+	return `- name: Copy a config file
+  copy:
+    src: files/app.conf
+    dest: /etc/app/app.conf
+    owner: root
+    group: root
+    mode: "0644"`
+}
+
+// Ensure Module implements the documentation interfaces.
+var (
+	_ module.Describer = (*Module)(nil)
+	_ module.Exampler  = (*Module)(nil)
+)
+
 // Run executes the copy module.
 //
 // Parameters:

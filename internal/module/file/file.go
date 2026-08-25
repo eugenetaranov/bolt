@@ -33,6 +33,16 @@ func (m *Module) Name() string {
 	return "file"
 }
 
+// Example returns a usage example for the file module.
+func (m *Module) Example() string {
+	return `- name: Ensure a directory exists
+  file:
+    path: /etc/app
+    state: directory
+    owner: root
+    mode: "0755"`
+}
+
 // Run executes the file module.
 //
 // Parameters:
