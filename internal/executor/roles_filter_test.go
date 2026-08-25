@@ -51,7 +51,9 @@ func runRolePlaybook(t *testing.T, yamlStr string, roleNames, roles, tags, skipT
 
 	buf := &bytes.Buffer{}
 	exec := New()
-	exec.Output = output.New(buf)
+	o := output.New(buf)
+	o.SetVerbose(true) // plan hides skipped tasks by default; reveal them for assertions
+	exec.Output = o
 	exec.AutoApprove = true
 	exec.Roles = roles
 	exec.Tags = tags
@@ -199,7 +201,9 @@ roles:
 
 	buf := &bytes.Buffer{}
 	exec := New()
-	exec.Output = output.New(buf)
+	o := output.New(buf)
+	o.SetVerbose(true) // plan hides skipped tasks by default; reveal them for assertions
+	exec.Output = o
 	exec.DryRun = true
 	exec.Roles = []string{"web"}
 

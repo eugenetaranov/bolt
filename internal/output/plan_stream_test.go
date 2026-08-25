@@ -19,28 +19,41 @@ func planTestTasks() []PlannedTask {
 // TestPlan_OmitsTagSkips verifies tag-filtered tasks are omitted from the plan
 // body and reported as "N filtered" in the summary, while role-filtered tasks
 // remain visible.
-func TestPlan_OmitsTagSkips(t *testing.T) {
-	var buf bytes.Buffer
-	o := New(&buf)
-	o.SetColor(false)
-	o.DisplayPlan(planTestTasks(), false)
-
-	got := buf.String()
-	if strings.Contains(got, "debian only") {
-		t.Errorf("tag-filtered task should be omitted from the plan:\n%s", got)
+func TestPlan_HidesSkips(t *testing.T) {
+	render := func(verbose bool) string {
+		var buf bytes.Buffer
+		o := New(&buf)
+		o.SetColor(false)
+		o.SetVerbose(verbose)
+		o.DisplayPlan(planTestTasks(), false)
+		return buf.String()
 	}
+
+	// Default: skipped tasks (tag and role) are hidden; active tasks shown.
+	got := render(false)
 	if !strings.Contains(got, "install nginx") || !strings.Contains(got, "scan ports") {
 		t.Errorf("active tasks should be shown:\n%s", got)
 	}
-	if !strings.Contains(got, "other role") {
-		t.Errorf("role-filtered task should still be shown:\n%s", got)
+	if strings.Contains(got, "debian only") {
+		t.Errorf("tag-filtered task should be hidden by default:\n%s", got)
 	}
-	if !strings.Contains(got, "1 filtered") {
-		t.Errorf("summary should report filtered count:\n%s", got)
+	if strings.Contains(got, "other role") {
+		t.Errorf("role-skipped task should be hidden by default:\n%s", got)
 	}
-	// The tag-skip must not be counted toward "to skip"; the role-skip is.
-	if !strings.Contains(got, "1 to skip") {
-		t.Errorf("role-skip should count as 'to skip':\n%s", got)
+	if !strings.Contains(got, "1 to skip") || !strings.Contains(got, "1 filtered") {
+		t.Errorf("summary should count hidden skips:\n%s", got)
+	}
+	if !strings.Contains(got, "use -v to show skipped") {
+		t.Errorf("summary should hint at -v when skips are hidden:\n%s", got)
+	}
+
+	// Verbose: skipped tasks are shown, and no hint.
+	v := render(true)
+	if !strings.Contains(v, "debian only") || !strings.Contains(v, "other role") {
+		t.Errorf("verbose should show skipped tasks:\n%s", v)
+	}
+	if strings.Contains(v, "use -v to show skipped") {
+		t.Errorf("verbose should not show the -v hint:\n%s", v)
 	}
 }
 

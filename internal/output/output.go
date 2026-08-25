@@ -412,10 +412,18 @@ func (o *Output) PlanLine(t PlannedTask) {
 		o.stopSpinner()
 		fmt.Fprint(o.w, "\r\033[K") // clear the "checking …" spinner line
 	}
-	if isFilteredPlanSkip(t) {
+	if o.hidePlanSkip(t) {
 		return
 	}
 	o.renderPlanTask(t)
+}
+
+// hidePlanSkip reports whether a planned task should be omitted from the plan
+// body. Skipped tasks (tag/role filtered or when-condition) are hidden by
+// default to keep the plan focused on what will actually run; they are only
+// counted in the summary. Use -v/--verbose (or --debug) to see them.
+func (o *Output) hidePlanSkip(t PlannedTask) bool {
+	return t.Status == "will_skip" && !o.verbose && !o.debug
 }
 
 // renderPlanTask prints a single planned task line plus its params and diff.
@@ -549,9 +557,13 @@ func (o *Output) PlanEnd(tasks []PlannedTask, _ bool) {
 		summaryParts = append(summaryParts, "nothing to do")
 	}
 
-	o.printf("\n%s %s\n",
+	tail := ""
+	if (willSkip+filtered) > 0 && !o.verbose && !o.debug {
+		tail = " " + o.color(colorGray, "(use -v to show skipped)")
+	}
+	o.printf("\n%s %s%s\n",
 		o.color(colorBold, "Plan:"),
-		strings.Join(summaryParts, ", ")+".")
+		strings.Join(summaryParts, ", ")+".", tail)
 }
 
 // hostColumnMax caps the host-prefix column width so pathological hostnames
@@ -679,7 +691,7 @@ func (o *Output) DisplayMultiHostPlan(tasks []PlannedTask, hosts []string, dryRu
 		}
 		prefix := formatHostPrefix(host, colWidth) + ": "
 		for _, t := range byHost[host] {
-			if isFilteredPlanSkip(t) {
+			if o.hidePlanSkip(t) {
 				continue
 			}
 			o.renderMultiHostPlanLine(t, prefix, colWidth)

@@ -201,7 +201,17 @@ func TestDisplayMultiHostPlan_OmitsTagSkips(t *testing.T) {
 	out := renderMulti(plans, hosts, false)
 
 	assert.Contains(t, out, "install nginx", "active task should be shown")
-	assert.NotContains(t, out, "build step", "tag-filtered task should be omitted")
-	assert.Contains(t, out, "role only", "role-filtered task should still be shown")
+	assert.NotContains(t, out, "build step", "tag-filtered task should be hidden by default")
+	assert.NotContains(t, out, "role only", "role-skipped task should be hidden by default")
 	assert.Contains(t, out, "2 filtered", "footer should report the filtered count across hosts")
+	assert.Contains(t, out, "1 to skip", "footer should count the hidden role-skip")
+
+	// Verbose shows the skipped tasks.
+	var vbuf bytes.Buffer
+	vo := New(&vbuf)
+	vo.SetColor(false)
+	vo.SetVerbose(true)
+	vo.DisplayMultiHostPlan(plans, hosts, false)
+	assert.Contains(t, vbuf.String(), "build step", "verbose should show tag-filtered tasks")
+	assert.Contains(t, vbuf.String(), "role only", "verbose should show role-skipped tasks")
 }
