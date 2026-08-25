@@ -169,3 +169,36 @@ func TestStartProgress_Interactive(t *testing.T) {
 		t.Error("labelFn should have been called at least once")
 	}
 }
+
+// TestTaskResult_Detail verifies the result-detail line: changed/failed tasks
+// show their message by default; routine ok/skipped stay terse unless verbose.
+func TestTaskResult_Detail(t *testing.T) {
+	render := func(status, message string, verbose bool) string {
+		var buf bytes.Buffer
+		o := New(&buf)
+		o.SetColor(false)
+		o.SetVerbose(verbose)
+		o.TaskResult("do thing", status, status == "changed", message, nil)
+		return buf.String()
+	}
+
+	if got := render("changed", "installed nginx", false); !strings.Contains(got, "→ installed nginx") {
+		t.Errorf("changed task should show detail by default: %q", got)
+	}
+	if got := render("failed", "boom", false); !strings.Contains(got, "→ boom") {
+		t.Errorf("failed task should show detail by default: %q", got)
+	}
+	if got := render("ok", "already present", false); strings.Contains(got, "already present") {
+		t.Errorf("ok task should be terse by default: %q", got)
+	}
+	if got := render("skipped", "when not met", false); strings.Contains(got, "when not met") {
+		t.Errorf("skipped task should be terse by default: %q", got)
+	}
+	if got := render("ok", "already present", true); !strings.Contains(got, "→ already present") {
+		t.Errorf("verbose should show ok detail: %q", got)
+	}
+	// Empty message never adds a detail line.
+	if got := render("changed", "", false); strings.Contains(got, "→") {
+		t.Errorf("empty message should add no detail line: %q", got)
+	}
+}

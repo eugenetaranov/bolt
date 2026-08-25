@@ -277,10 +277,21 @@ func (o *Output) TaskResult(name, status string, changed bool, message string, t
 		o.printf("  %s %s%s\n", o.color(sd.color, sd.indicator), name, suffix)
 	}
 
-	// In debug mode, print additional details
-	if o.debug && message != "" {
+	// Print the result detail. Changed and failed tasks always show what
+	// happened; routine ok/skipped details are shown only with -v/--debug to
+	// keep steady-state runs terse.
+	if message != "" && o.showTaskDetail(status) {
 		o.printf("    %s %s\n", o.color(colorGray, "→"), message)
 	}
+}
+
+// showTaskDetail reports whether a task's result message should be printed
+// under its status line.
+func (o *Output) showTaskDetail(status string) bool {
+	if o.debug || o.verbose {
+		return true
+	}
+	return strings.HasPrefix(status, "changed") || strings.HasPrefix(status, "failed")
 }
 
 // Section prints a section header.
