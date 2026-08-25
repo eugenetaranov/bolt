@@ -420,18 +420,7 @@ func runPlaybook(cmd *cobra.Command, args []string) error {
 		}
 		return string(passBytes), nil
 	}
-	// -s/--sudo forces the prompt; a playbook/task `sudo: true` also triggers
-	// it (see executor.needsSudoPassword).
-	exec.SudoPromptRequested, _ = cmd.Flags().GetBool("sudo")
-	// Opt out of the sudo prompt only when explicitly asked (--no-sudo-prompt /
-	// TACK_SUDO_NO_PROMPT) or when stdin isn't a TTY (CI / piped input), where
-	// prompting would just hang. --auto-approve deliberately does NOT suppress
-	// the sudo prompt: it only skips the plan approval, so `tack run -sa` still
-	// prompts for the sudo password on an interactive terminal.
-	noPromptFlag, _ := cmd.Flags().GetBool("no-sudo-prompt")
-	envNoPrompt := os.Getenv("TACK_SUDO_NO_PROMPT")
-	envOptOut := envNoPrompt == "1" || envNoPrompt == "true" || envNoPrompt == "yes"
-	exec.SudoNoPrompt = sudoNoPrompt(noPromptFlag, envOptOut, term.IsTerminal(int(syscall.Stdin)))
+	configureSudoPrompt(exec, cmd, autoApprove, term.IsTerminal(int(syscall.Stdin)))
 	// SSH password fallback: prompted lazily, at most once per run, only
 	// if a connector actually needs it (key/agent auth unavailable or
 	// rejected) — see internal/connector/ssh's WithPasswordPrompt.
@@ -722,11 +711,22 @@ func examplePlaceholder(p module.ParamDoc) string {
 	}
 }
 
-// sudoNoPrompt decides whether to skip the interactive sudo-password prompt.
-// --auto-approve is intentionally NOT a factor here: it only skips the plan
-// approval, not the sudo prompt, so `tack run -sa` still prompts on a TTY.
-func sudoNoPrompt(noPromptFlag, envOptOut, stdinIsTTY bool) bool {
-	return noPromptFlag || envOptOut || !stdinIsTTY
+// configureSudoPrompt sets the executor's sudo-prompt behavior from the run
+// flags. -s/--sudo forces the prompt; a playbook/task `sudo: true` also
+// triggers it (see executor.needsSudoPassword). The prompt is skipped only on
+// explicit opt-out (--no-sudo-prompt / TACK_SUDO_NO_PROMPT) or a non-TTY stdin
+// (CI / piped input), where prompting would just hang.
+//
+// autoApprove is accepted but intentionally ignored: it skips the plan
+// approval, NOT the sudo password prompt, so `tack run -sa` still prompts on a
+// TTY. This is the exact regression guarded by TestConfigureSudoPrompt.
+func configureSudoPrompt(exec *executor.Executor, cmd *cobra.Command, autoApprove, stdinIsTTY bool) {
+	_ = autoApprove // MUST NOT influence the sudo prompt
+	exec.SudoPromptRequested, _ = cmd.Flags().GetBool("sudo")
+	noPromptFlag, _ := cmd.Flags().GetBool("no-sudo-prompt")
+	env := os.Getenv("TACK_SUDO_NO_PROMPT")
+	envOptOut := env == "1" || env == "true" || env == "yes"
+	exec.SudoNoPrompt = noPromptFlag || envOptOut || !stdinIsTTY
 }
 
 // generateCmd captures live system resources and outputs a playbook.

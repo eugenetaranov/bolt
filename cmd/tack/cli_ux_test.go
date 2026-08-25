@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+	"github.com/tackhq/tack/internal/executor"
 	"github.com/tackhq/tack/internal/module"
 )
 
@@ -162,20 +164,49 @@ func TestAutoApproveFlags(t *testing.T) {
 	}
 }
 
-func TestSudoNoPrompt_AutoApproveDoesNotSuppress(t *testing.T) {
-	// Interactive TTY, no explicit opt-out -> must prompt (so `-sa` works).
-	if sudoNoPrompt(false, false, true) {
-		t.Error("interactive with no opt-out should NOT skip the sudo prompt")
+func TestConfigureSudoPrompt(t *testing.T) {
+	t.Setenv("TACK_SUDO_NO_PROMPT", "") // ensure env opt-out is off
+
+	newCmd := func(args ...string) *cobra.Command {
+		c := &cobra.Command{}
+		addConnectionFlags(c)
+		if err := c.ParseFlags(args); err != nil {
+			t.Fatalf("parse %v: %v", args, err)
+		}
+		return c
 	}
-	// Explicit opt-outs still skip.
-	if !sudoNoPrompt(true, false, true) {
-		t.Error("--no-sudo-prompt should skip")
+	resolve := func(cmd *cobra.Command, autoApprove, tty bool) (requested, noPrompt bool) {
+		e := &executor.Executor{}
+		configureSudoPrompt(e, cmd, autoApprove, tty)
+		return e.SudoPromptRequested, e.SudoNoPrompt
 	}
-	if !sudoNoPrompt(false, true, true) {
-		t.Error("TACK_SUDO_NO_PROMPT should skip")
+
+	// THE REGRESSION: `tack run -sa` on a TTY must still prompt for sudo —
+	// --auto-approve skips the plan approval, not the sudo password prompt.
+	if req, noPrompt := resolve(newCmd("-s"), true /*autoApprove*/, true /*tty*/); !req || noPrompt {
+		t.Errorf("-s with --auto-approve on TTY: requested=%v noPrompt=%v, want true/false", req, noPrompt)
 	}
-	// Non-TTY (CI / piped) skips.
-	if !sudoNoPrompt(false, false, false) {
-		t.Error("non-TTY should skip")
+
+	// auto-approve must be inert: identical result whether or not it's set.
+	withAA, _ := resolve(newCmd("-s"), true, true)
+	withoutAA, _ := resolve(newCmd("-s"), false, true)
+	_, npWith := resolve(newCmd("-s"), true, true)
+	_, npWithout := resolve(newCmd("-s"), false, true)
+	if withAA != withoutAA || npWith != npWithout {
+		t.Errorf("--auto-approve changed sudo-prompt decision (with=%v/%v without=%v/%v)", withAA, npWith, withoutAA, npWithout)
+	}
+
+	// Explicit opt-out and non-TTY still skip.
+	if _, noPrompt := resolve(newCmd("-s", "--no-sudo-prompt"), true, true); !noPrompt {
+		t.Error("--no-sudo-prompt should skip the prompt")
+	}
+	if _, noPrompt := resolve(newCmd("-s"), false, false /*non-TTY*/); !noPrompt {
+		t.Error("non-TTY should skip the prompt")
+	}
+
+	// Env opt-out still skips.
+	t.Setenv("TACK_SUDO_NO_PROMPT", "1")
+	if _, noPrompt := resolve(newCmd("-s"), false, true); !noPrompt {
+		t.Error("TACK_SUDO_NO_PROMPT=1 should skip the prompt")
 	}
 }
