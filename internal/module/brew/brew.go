@@ -169,7 +169,11 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 
 // checkHomebrew verifies that Homebrew is installed.
 func checkHomebrew(ctx context.Context, conn connector.Connector) error {
-	if _, err := connector.Run(ctx, conn, "command -v brew"); err != nil {
+	ok, err := module.CommandAvailable(ctx, conn, "brew")
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return fmt.Errorf("homebrew is not installed")
 	}
 	return nil

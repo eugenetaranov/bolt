@@ -244,7 +244,11 @@ func normalizeUnit(name string) string {
 
 // checkSystemd verifies that systemctl is available.
 func checkSystemd(ctx context.Context, conn connector.Connector) error {
-	if _, err := connector.Run(ctx, conn, "command -v systemctl"); err != nil {
+	ok, err := module.CommandAvailable(ctx, conn, "systemctl")
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return fmt.Errorf("systemctl is not available (not a systemd system?)")
 	}
 	return nil
