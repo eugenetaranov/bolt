@@ -94,6 +94,25 @@ func getUserInfo(ctx context.Context, conn connector.Connector, name string) (*u
 	return info, nil
 }
 
+// resolveGID resolves a primary-group reference (a name or a numeric gid) to
+// its numeric gid on the target. Returns (gid, true) on success.
+func resolveGID(ctx context.Context, conn connector.Connector, group string) (int, bool) {
+	if gid, err := strconv.Atoi(group); err == nil {
+		return gid, true
+	}
+	res, err := conn.Execute(ctx, fmt.Sprintf("getent group %s", connector.ShellQuote(group)))
+	if err != nil || res.ExitCode != 0 {
+		return 0, false
+	}
+	fields := strings.Split(strings.TrimSpace(res.Stdout), ":")
+	if len(fields) >= 3 {
+		if gid, err := strconv.Atoi(fields[2]); err == nil {
+			return gid, true
+		}
+	}
+	return 0, false
+}
+
 // getUserGroups parses `id -Gn <name>` output to get supplementary group membership.
 // Returns only supplementary groups (excludes primary group).
 func getUserGroups(ctx context.Context, conn connector.Connector, name string) ([]string, error) {
@@ -176,6 +195,7 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 	system := module.GetBool(params, "system", false)
 	password := module.GetString(params, "password", "")
 	groups := module.GetStringSlice(params, "groups")
+	group := module.GetString(params, "group", "") // primary group (name or gid)
 
 	if !info.Exists {
 		cmd := "useradd"
@@ -187,6 +207,9 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 		}
 		if uidParam >= 0 {
 			cmd += fmt.Sprintf(" -u %d", uidParam)
+		}
+		if group != "" {
+			cmd += fmt.Sprintf(" -g %s", connector.ShellQuote(group))
 		}
 		if len(groups) > 0 {
 			cmd += fmt.Sprintf(" -G %s", strings.Join(groups, ","))
@@ -222,6 +245,13 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 	if uidParam >= 0 && uidParam != info.UID {
 		modArgs = append(modArgs, "-u", strconv.Itoa(uidParam))
 		modifications = append(modifications, fmt.Sprintf("uid changed to %d", uidParam))
+	}
+
+	if group != "" {
+		if gid, ok := resolveGID(ctx, conn, group); !ok || gid != info.GID {
+			modArgs = append(modArgs, "-g", connector.ShellQuote(group))
+			modifications = append(modifications, "primary group changed to "+group)
+		}
 	}
 
 	if password != "" {
@@ -289,6 +319,7 @@ func (m *Module) Check(ctx context.Context, conn connector.Connector, params map
 	uidParam := module.GetInt(params, "uid", -1)
 	password := module.GetString(params, "password", "")
 	groups := module.GetStringSlice(params, "groups")
+	group := module.GetString(params, "group", "")
 
 	var changes []string
 
@@ -300,6 +331,11 @@ func (m *Module) Check(ctx context.Context, conn connector.Connector, params map
 	}
 	if uidParam >= 0 && uidParam != info.UID {
 		changes = append(changes, "uid")
+	}
+	if group != "" {
+		if gid, ok := resolveGID(ctx, conn, group); !ok || gid != info.GID {
+			changes = append(changes, "primary group")
+		}
 	}
 	if password != "" {
 		changes = append(changes, "password")
@@ -333,6 +369,7 @@ func (m *Module) Parameters() []module.ParamDoc {
 		{Name: "uid", Type: "int", Description: "User ID"},
 		{Name: "shell", Type: "string", Description: "Login shell (e.g., /bin/bash)"},
 		{Name: "home", Type: "string", Description: "Home directory path"},
+		{Name: "group", Type: "string", Description: "Primary group (name or gid)"},
 		{Name: "groups", Type: "[]string", Description: "Supplementary groups (appended to existing)"},
 		{Name: "system", Type: "bool", Default: "false", Description: "Create a system user"},
 		{Name: "password", Type: "string", Description: "Pre-hashed password (e.g., SHA-512 crypt format)"},

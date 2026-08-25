@@ -528,6 +528,7 @@ Manage system users on Linux using useradd/usermod/userdel.
 | uid      | int            | no       | -         | User ID                                      |
 | shell    | string         | no       | ""        | Login shell (e.g., /bin/bash)                |
 | home     | string         | no       | ""        | Home directory path                          |
+| group    | string         | no       | ""        | Primary group (name or gid)                  |
 | groups   | []string       | no       | []        | Supplementary groups (appended)              |
 | system   | bool           | no       | false     | Create a system user                         |
 | password | string         | no       | ""        | Pre-hashed password (SHA-512 crypt format)   |

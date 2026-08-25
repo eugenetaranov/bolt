@@ -394,3 +394,71 @@ func TestStringSliceEqual(t *testing.T) {
 		}
 	}
 }
+
+func execedContains(m *mockConnector, sub string) bool {
+	for _, c := range m.executed {
+		if strings.Contains(c, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRunCreateUser_PrimaryGroup(t *testing.T) {
+	conn := newMockConnector()
+	conn.onCmd("getent passwd 'scans'", "", 2) // doesn't exist
+	conn.onCmd("useradd -s '/usr/sbin/nologin' -g 'scans' -r 'scans'", "", 0)
+
+	res, err := (&Module{}).Run(context.Background(), conn, map[string]any{
+		"name": "scans", "system": true, "group": "scans", "shell": "/usr/sbin/nologin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Changed {
+		t.Fatal("expected Changed=true")
+	}
+	if !execedContains(conn, "useradd") || !execedContains(conn, "-g 'scans'") {
+		t.Errorf("expected useradd with -g 'scans', got: %v", conn.executed)
+	}
+}
+
+func TestRunUser_PrimaryGroupModifyAndIdempotent(t *testing.T) {
+	// Existing user with primary gid 1000. Desired group "staff" (gid 2000) -> modify.
+	t.Run("modify", func(t *testing.T) {
+		conn := newMockConnector()
+		conn.onCmd("getent passwd 'deploy'", "deploy:x:1000:1000::/home/deploy:/bin/bash\n", 0)
+		conn.onCmd("id -gn 'deploy'", "deploy\n", 0)
+		conn.onCmd("id -Gn 'deploy'", "deploy\n", 0)
+		conn.onCmd("getent group 'staff'", "staff:x:2000:\n", 0)
+		conn.onCmd("usermod -g 'staff' 'deploy'", "", 0)
+
+		res, err := (&Module{}).Run(context.Background(), conn, map[string]any{"name": "deploy", "group": "staff"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.Changed || !execedContains(conn, "usermod -g 'staff'") {
+			t.Errorf("expected usermod -g 'staff', changed=%v cmds=%v", res.Changed, conn.executed)
+		}
+	})
+
+	// Desired group resolves to the user's existing primary gid -> no change.
+	t.Run("idempotent", func(t *testing.T) {
+		conn := newMockConnector()
+		conn.onCmd("getent passwd 'deploy'", "deploy:x:1000:1000::/home/deploy:/bin/bash\n", 0)
+		conn.onCmd("id -gn 'deploy'", "deploy\n", 0)
+		conn.onCmd("id -Gn 'deploy'", "deploy\n", 0)
+		conn.onCmd("getent group 'deploy'", "deploy:x:1000:\n", 0)
+
+		res, err := (&Module{}).Run(context.Background(), conn, map[string]any{"name": "deploy", "group": "deploy"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Changed {
+			t.Errorf("expected no change; cmds=%v", conn.executed)
+		}
+		if execedContains(conn, "usermod") {
+			t.Errorf("should not run usermod when primary group already matches")
+		}
+	})
+}
