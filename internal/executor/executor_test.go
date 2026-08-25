@@ -465,7 +465,7 @@ func TestToStringMap(t *testing.T) {
 	}
 }
 
-func TestNeedsSudoPassword_ExplicitFlagOnly(t *testing.T) {
+func TestNeedsSudoPassword_Triggers(t *testing.T) {
 	cases := []struct {
 		name          string
 		play          *playbook.Play
@@ -481,10 +481,17 @@ func TestNeedsSudoPassword_ExplicitFlagOnly(t *testing.T) {
 			wantPrompted:  false,
 		},
 		{
-			name:          "playbook sudo:true but flag not passed — no prompt",
+			name:          "playbook sudo:true triggers prompt even without the flag",
 			play:          &playbook.Play{Sudo: true},
 			sudoRequested: false,
 			sudoNoPrompt:  false,
+			wantPrompted:  true,
+		},
+		{
+			name:          "playbook sudo:true but opt-out set — no prompt",
+			play:          &playbook.Play{Sudo: true},
+			sudoRequested: false,
+			sudoNoPrompt:  true,
 			wantPrompted:  false,
 		},
 		{

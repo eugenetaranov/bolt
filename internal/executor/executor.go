@@ -2019,23 +2019,48 @@ func (e *Executor) planHandlers(host string, tasks []*playbook.Task, taskPlan []
 	return plan
 }
 
-// needsSudoPassword prompts for a sudo password when sudo was explicitly
-// requested via -s/--sudo on the CLI and no password has been provided yet.
-// This runs before any host output so the prompt appears before "PLAY
-// <host>".
+// playRequiresSudo reports whether the play uses privilege escalation
+// anywhere: at play level, or on any task/handler including nested
+// block/rescue/always tasks.
+func playRequiresSudo(play *playbook.Play) bool {
+	if play.Sudo {
+		return true
+	}
+	var walk func(tasks []*playbook.Task) bool
+	walk = func(tasks []*playbook.Task) bool {
+		for _, t := range tasks {
+			if t == nil {
+				continue
+			}
+			if t.Sudo != nil && *t.Sudo {
+				return true
+			}
+			if walk(t.Block) || walk(t.Rescue) || walk(t.Always) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(play.Tasks) || walk(play.Handlers)
+}
+
+// needsSudoPassword prompts for a sudo password when the run uses privilege
+// escalation and no password has been provided yet. Escalation is "used" when
+// -s/--sudo is passed OR a playbook/task sets `sudo: true`. This runs before
+// any per-host output so the prompt appears before "PLAY <host>".
 //
-// Playbook- or task-level `sudo: true` alone does NOT trigger the prompt:
-// passwordless sudo (NOPASSWD) works transparently, and if a target
-// actually requires a password, sudo itself surfaces the error, or the
-// caller can supply --sudo-password / TACK_SUDO_PASSWORD explicitly.
+// Passwordless-sudo (NOPASSWD) users on a TTY can skip the prompt with
+// --no-sudo-prompt / TACK_SUDO_NO_PROMPT; non-interactive runs (no TTY,
+// --auto-approve, JSON) skip it automatically via SudoNoPrompt.
 func (e *Executor) needsSudoPassword(play *playbook.Play) error {
 	// Already have a sudo password
 	if play.SudoPassword != "" {
 		return nil
 	}
 
-	// Only prompt when the user explicitly asked for sudo on the CLI.
-	if !e.SudoPromptRequested {
+	// Only prompt when escalation is actually used — via the CLI flag or a
+	// playbook/task `sudo: true`.
+	if !e.SudoPromptRequested && !playRequiresSudo(play) {
 		return nil
 	}
 
