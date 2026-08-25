@@ -671,6 +671,57 @@ Registered result fields: `changed`, `action` (one of `created`,
     state: absent
 ```
 
+### iptables
+
+Manage a single iptables/ip6tables firewall rule on Linux. Idempotent via
+`iptables -C`; rules are tagged with a comment for reliable matching. Requires
+root/sudo. Linux-only.
+
+| Param            | Type       | Required | Default   | Description                                   |
+|------------------|------------|----------|-----------|-----------------------------------------------|
+| chain            | string     | yes      | -         | INPUT, OUTPUT, FORWARD, or a custom chain     |
+| table            | string     | no       | "filter"  | filter, nat, mangle, raw, security            |
+| protocol         | string     | no       | ""        | tcp, udp, icmp, all                           |
+| source           | string     | no       | ""        | Source address or CIDR                        |
+| destination      | string     | no       | ""        | Destination address or CIDR                   |
+| source_port      | string/int | no       | ""        | Source port or range (requires protocol)      |
+| destination_port | string/int | no       | ""        | Destination port or range (requires protocol) |
+| in_interface     | string     | no       | ""        | Inbound interface                             |
+| out_interface    | string     | no       | ""        | Outbound interface                            |
+| ctstate          | string     | no       | ""        | Conntrack states, e.g. "NEW,ESTABLISHED"      |
+| jump             | string     | no       | ""        | Target: ACCEPT, DROP, REJECT, LOG, or a chain |
+| action           | string     | no       | "append"  | append or insert                              |
+| rule_num         | int        | no       | 0         | Insert position (with action: insert)         |
+| comment          | string     | no       | ""        | Rule comment (tagged via -m comment)          |
+| ip_version       | string     | no       | "ipv4"    | ipv4 (iptables) or ipv6 (ip6tables)           |
+| state            | string     | no       | "present" | present, absent                               |
+| persist          | bool       | no       | false     | Persist across reboot after a change          |
+
+`persist: true` saves rules per distro family after a change: netfilter-persistent
+or /etc/iptables/rules.v{4,6} (Debian/Ubuntu), /etc/sysconfig/{ip,ip6}tables
+(RHEL/CentOS/Fedora), /etc/iptables/{iptables,ip6tables}.rules (Arch).
+
+```yaml
+- name: Allow SSH
+  iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: 22
+    ctstate: NEW,ESTABLISHED
+    jump: ACCEPT
+    comment: "allow ssh"
+    persist: true
+
+- name: Drop an old rule
+  iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: 8080
+    jump: ACCEPT
+    comment: "old app"
+    state: absent
+```
+
 ---
 
 ## CLI

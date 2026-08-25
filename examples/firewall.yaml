@@ -1,0 +1,76 @@
+---
+# Example playbook demonstrating the iptables module.
+#
+# The iptables module is Linux-only and requires root/sudo. Rules are managed
+# idempotently and tagged with a comment so re-runs never duplicate them.
+# `persist: true` saves the ruleset across reboot using the right mechanism
+# for the target distro (netfilter-persistent, /etc/sysconfig, or
+# /etc/iptables/*.rules).
+- name: Configure host firewall
+  hosts: all
+  sudo: true
+  gather_facts: false
+  tasks:
+    - name: Allow established/related traffic
+      iptables:
+        chain: INPUT
+        ctstate: "ESTABLISHED,RELATED"
+        jump: ACCEPT
+        comment: "conntrack established"
+
+    - name: Allow SSH
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 22
+        ctstate: NEW
+        jump: ACCEPT
+        comment: "allow ssh"
+
+    - name: Allow HTTPS
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 443
+        jump: ACCEPT
+        comment: "allow https"
+
+    - name: Allow loopback
+      iptables:
+        chain: INPUT
+        in_interface: lo
+        jump: ACCEPT
+        comment: "allow loopback"
+
+    - name: Allow ICMP echo over IPv6
+      iptables:
+        ip_version: ipv6
+        chain: INPUT
+        protocol: ipv6-icmp
+        jump: ACCEPT
+        comment: "allow icmpv6"
+
+    - name: Insert a temporary block at the top of INPUT
+      iptables:
+        chain: INPUT
+        source: 192.0.2.0/24
+        jump: DROP
+        action: insert
+        rule_num: 1
+        comment: "block bad subnet"
+
+    - name: Drop everything else on INPUT, and persist the ruleset
+      iptables:
+        chain: INPUT
+        jump: DROP
+        comment: "default deny"
+        persist: true
+
+    - name: Remove an obsolete rule
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 8080
+        jump: ACCEPT
+        comment: "old app"
+        state: absent

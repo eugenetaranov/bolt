@@ -40,7 +40,7 @@ tasks:
 ## Features
 
 - **Simple YAML playbooks** with Ansible-compatible role structure
-- **Idempotent modules** -- apt, brew, yum, file, copy, command, cron, systemd, template, lineinfile, blockinfile, wait_for, assert
+- **Idempotent modules** -- apt, brew, yum, file, copy, command, cron, systemd, template, lineinfile, blockinfile, iptables, wait_for, assert
 - **Cross-platform** -- macOS (brew) and Linux (apt, yum, systemd)
 - **Multiple connectors** -- Local, Docker, SSH, AWS SSM with tag-based discovery
 - **Plan/apply workflow** -- preview changes before applying, `--auto-approve` for CI
@@ -386,6 +386,7 @@ See [`examples/dynamic-inventory/`](examples/dynamic-inventory/) for complete sa
 | `lineinfile` | Ensure a specific line is present or absent in a file |
 | `blockinfile` | Manage a block of text between marker lines in a file |
 | `systemd` | Manage systemd services (start, stop, enable, mask, daemon-reload) |
+| `iptables` | Manage iptables/ip6tables firewall rules on Linux (idempotent, optional reboot persistence) |
 | `template` | Render Go templates with variable substitution |
 | `user` | Manage system users on Linux (create, modify, remove) |
 | `group` | Manage system groups on Linux (create, modify, remove) |
