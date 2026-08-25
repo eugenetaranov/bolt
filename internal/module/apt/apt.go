@@ -234,7 +234,11 @@ type packageState struct {
 
 // checkApt verifies that apt is available.
 func checkApt(ctx context.Context, conn connector.Connector) error {
-	if _, err := connector.Run(ctx, conn, "command -v apt-get"); err != nil {
+	ok, err := module.CommandAvailable(ctx, conn, "apt-get")
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return fmt.Errorf("apt-get is not available (not a Debian/Ubuntu system?)")
 	}
 	return nil

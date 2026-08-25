@@ -114,11 +114,11 @@ func envPrefix(sshCmd string) string {
 
 // ensureGit verifies git is installed on the target.
 func ensureGit(ctx context.Context, conn connector.Connector) error {
-	result, err := conn.Execute(ctx, "command -v git")
+	ok, err := module.CommandAvailable(ctx, conn, "git")
 	if err != nil {
-		return fmt.Errorf("failed to probe for git: %w", err)
+		return err
 	}
-	if result.ExitCode != 0 {
+	if !ok {
 		return fmt.Errorf("git binary not found on target: install git before running this module")
 	}
 	return nil

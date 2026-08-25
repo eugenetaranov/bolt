@@ -276,11 +276,14 @@ func (m *Module) Check(ctx context.Context, conn connector.Connector, params map
 
 // detectPackageManager checks whether dnf or yum is available, preferring dnf.
 func detectPackageManager(ctx context.Context, conn connector.Connector) (string, error) {
-	if _, err := connector.Run(ctx, conn, "command -v dnf"); err == nil {
-		return "dnf", nil
-	}
-	if _, err := connector.Run(ctx, conn, "command -v yum"); err == nil {
-		return "yum", nil
+	for _, mgr := range []string{"dnf", "yum"} {
+		ok, err := module.CommandAvailable(ctx, conn, mgr)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return mgr, nil
+		}
 	}
 	return "", fmt.Errorf("neither dnf nor yum is available (not an RPM-based system?)")
 }
