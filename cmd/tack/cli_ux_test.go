@@ -210,3 +210,30 @@ func TestConfigureSudoPrompt(t *testing.T) {
 		t.Error("TACK_SUDO_NO_PROMPT=1 should skip the prompt")
 	}
 }
+
+func TestColorDisabled(t *testing.T) {
+	// Flag wins regardless of env.
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("CLICOLOR", "")
+	if !colorDisabled(true) {
+		t.Error("--no-color flag should disable color")
+	}
+	if colorDisabled(false) {
+		t.Error("no flag, no env -> color enabled")
+	}
+	// NO_COLOR set to any non-empty value disables.
+	t.Setenv("NO_COLOR", "1")
+	if !colorDisabled(false) {
+		t.Error("NO_COLOR set should disable color")
+	}
+	t.Setenv("NO_COLOR", "")
+	// CLICOLOR=0 disables; other values do not.
+	t.Setenv("CLICOLOR", "0")
+	if !colorDisabled(false) {
+		t.Error("CLICOLOR=0 should disable color")
+	}
+	t.Setenv("CLICOLOR", "1")
+	if colorDisabled(false) {
+		t.Error("CLICOLOR=1 should not disable color")
+	}
+}

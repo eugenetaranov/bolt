@@ -133,7 +133,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&showDiff, "diff", false, "Show file content diffs in plan output")
 	rootCmd.PersistentFlags().BoolVarP(&dryRun, "dry-run", "n", false, "Show what would be done without making changes")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "check", false, "Alias for --dry-run")
-	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
+	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output and live spinners (also honors NO_COLOR and CLICOLOR=0)")
 	rootCmd.PersistentFlags().StringVar(&outputMode, "output", "text", "Output format: text or json")
 
 	// Add subcommands
@@ -478,7 +478,7 @@ func runPlaybook(cmd *cobra.Command, args []string) error {
 		exec.Roles = roles
 	}
 
-	exec.Output.SetColor(!noColor)
+	exec.Output.SetColor(!colorDisabled(noColor))
 	exec.Output.SetDebug(debug)
 	exec.Output.SetVerbose(verbose)
 	exec.Output.SetDiff(showDiff)
@@ -720,6 +720,23 @@ func examplePlaceholder(p module.ParamDoc) string {
 // autoApprove is accepted but intentionally ignored: it skips the plan
 // approval, NOT the sudo password prompt, so `tack run -sa` still prompts on a
 // TTY. This is the exact regression guarded by TestConfigureSudoPrompt.
+// colorDisabled reports whether colored output (and thus live spinners) should
+// be off. It honors the --no-color flag plus the NO_COLOR and CLICOLOR=0
+// environment conventions (https://no-color.org), so CI/log capture stays clean
+// even when a pseudo-TTY is allocated.
+func colorDisabled(flagNoColor bool) bool {
+	if flagNoColor {
+		return true
+	}
+	if os.Getenv("NO_COLOR") != "" {
+		return true
+	}
+	if os.Getenv("CLICOLOR") == "0" {
+		return true
+	}
+	return false
+}
+
 func configureSudoPrompt(exec *executor.Executor, cmd *cobra.Command, autoApprove, stdinIsTTY bool) {
 	_ = autoApprove // MUST NOT influence the sudo prompt
 	exec.SudoPromptRequested, _ = cmd.Flags().GetBool("sudo")
@@ -884,7 +901,7 @@ Examples:
 			Debug:   debug,
 			Verbose: verbose,
 			DryRun:  dryRun,
-			NoColor: noColor,
+			NoColor: colorDisabled(noColor),
 		})
 	},
 }
