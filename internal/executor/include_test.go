@@ -238,26 +238,27 @@ func TestPlanTasksInclude(t *testing.T) {
 // nullEmitter is a no-op output emitter for testing.
 type nullEmitter struct{}
 
-func (n *nullEmitter) PlaybookStart(path string)                                   {}
-func (n *nullEmitter) PlaybookEnd(stats output.Stats)                              {}
-func (n *nullEmitter) PlayStart(play *playbook.Play)                               {}
-func (n *nullEmitter) HostStart(host, conn string)                                 {}
-func (n *nullEmitter) HostFactsResult(host string, ok bool, errMsg string)         {}
-func (n *nullEmitter) HostStartDone(host string)                                   {}
-func (n *nullEmitter) PlayHosts(hosts []string)                                    {}
-func (n *nullEmitter) TaskStart(name, module string)                               {}
+func (n *nullEmitter) PlaybookStart(path string)                                                  {}
+func (n *nullEmitter) PlaybookEnd(stats output.Stats)                                             {}
+func (n *nullEmitter) PlayStart(play *playbook.Play)                                              {}
+func (n *nullEmitter) HostStart(host, conn string)                                                {}
+func (n *nullEmitter) HostFactsStart(host string)                                                 {}
+func (n *nullEmitter) HostFactsResult(host string, ok bool, errMsg string)                        {}
+func (n *nullEmitter) HostStartDone(host string)                                                  {}
+func (n *nullEmitter) PlayHosts(hosts []string)                                                   {}
+func (n *nullEmitter) TaskStart(name, module string)                                              {}
 func (n *nullEmitter) TaskResult(name, status string, changed bool, detail string, tags []string) {}
-func (n *nullEmitter) DisplayPlan(tasks []output.PlannedTask, dryRun bool)         {}
+func (n *nullEmitter) DisplayPlan(tasks []output.PlannedTask, dryRun bool)                        {}
 func (n *nullEmitter) DisplayMultiHostPlan(tasks []output.PlannedTask, hosts []string, dryRun bool) {
 }
-func (n *nullEmitter) PromptApproval(_ string) bool                                { return true }
-func (n *nullEmitter) Section(name string)                                         {}
-func (n *nullEmitter) Info(format string, args ...any)                             {}
-func (n *nullEmitter) Warn(format string, args ...any)                             {}
-func (n *nullEmitter) Error(format string, args ...any)                            {}
-func (n *nullEmitter) Debug(format string, args ...any)                            {}
-func (n *nullEmitter) SetColor(enabled bool)                                       {}
-func (n *nullEmitter) SetDebug(enabled bool)                                       {}
-func (n *nullEmitter) SetVerbose(enabled bool)                                     {}
-func (n *nullEmitter) SetDiff(enabled bool)                                        {}
-func (n *nullEmitter) DiffEnabled() bool                                           { return false }
+func (n *nullEmitter) PromptApproval(_ string) bool     { return true }
+func (n *nullEmitter) Section(name string)              {}
+func (n *nullEmitter) Info(format string, args ...any)  {}
+func (n *nullEmitter) Warn(format string, args ...any)  {}
+func (n *nullEmitter) Error(format string, args ...any) {}
+func (n *nullEmitter) Debug(format string, args ...any) {}
+func (n *nullEmitter) SetColor(enabled bool)            {}
+func (n *nullEmitter) SetDebug(enabled bool)            {}
+func (n *nullEmitter) SetVerbose(enabled bool)          {}
+func (n *nullEmitter) SetDiff(enabled bool)             {}
+func (n *nullEmitter) DiffEnabled() bool                { return false }

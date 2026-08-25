@@ -77,3 +77,56 @@ func TestPrintfStopsSpinner(t *testing.T) {
 		t.Fatal("printf should have stopped the active spinner")
 	}
 }
+
+// TestHostFacts_NonInteractive verifies plain output is unchanged: the banner,
+// the "gathering facts" suffix, and the ✓ are printed on one line with no
+// spinner control codes.
+func TestHostFacts_NonInteractive(t *testing.T) {
+	var buf bytes.Buffer
+	o := New(&buf) // not a terminal → interactive=false
+	o.SetColor(false)
+
+	o.HostStart("192.168.1.113", "ssh")
+	o.HostFactsStart("192.168.1.113") // no-op in plain mode
+	o.HostFactsResult("192.168.1.113", true, "")
+
+	got := buf.String()
+	if want := "\nHOST 192.168.1.113 [ssh] - gathering facts ✓\n"; got != want {
+		t.Fatalf("plain host-facts output = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "\r") || strings.Contains(got, "\033[K") {
+		t.Fatalf("plain output must not contain spinner control codes: %q", got)
+	}
+}
+
+// TestHostFacts_Interactive verifies the spinner path: the "gathering facts"
+// line animates in place (carriage return + clear-to-EOL) and resolves to the
+// full banner ending with the ✓.
+func TestHostFacts_Interactive(t *testing.T) {
+	var buf bytes.Buffer
+	o := New(&buf)
+	o.interactive = true // force interactive without a real TTY
+
+	o.HostStart("192.168.1.113", "ssh")
+	o.HostFactsStart("192.168.1.113")
+	time.Sleep(120 * time.Millisecond) // let the spinner draw at least one frame
+	o.HostFactsResult("192.168.1.113", true, "")
+
+	got := buf.String()
+	if !strings.Contains(got, "\r") || !strings.Contains(got, "\033[K") {
+		t.Fatalf("interactive output should redraw in place: %q", got)
+	}
+	if !strings.Contains(got, "gathering facts") {
+		t.Fatalf("expected the whole 'gathering facts' line: %q", got)
+	}
+	if !strings.Contains(got, "✓") {
+		t.Fatalf("expected the final ✓: %q", got)
+	}
+	if !strings.HasSuffix(got, "\033[K\n") {
+		t.Fatalf("final line should clear to EOL and end with a newline: %q", got)
+	}
+	// A spinner frame must have been drawn while gathering.
+	if !strings.ContainsAny(got, strings.Join(spinnerFrames, "")) {
+		t.Fatalf("expected a spinner frame in output: %q", got)
+	}
+}

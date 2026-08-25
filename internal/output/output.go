@@ -47,6 +47,7 @@ type Output struct {
 	diff        bool
 	interactive bool
 	spin        *spinner
+	hostLabel   string // "host [conn]" of the open HostStart banner
 }
 
 // New creates a new output handler. When w is a terminal, task execution is
@@ -150,19 +151,43 @@ func (o *Output) PlaybookEnd(stats Stats) {
 // line is closed by either HostFactsResult (when facts are gathered) or
 // HostStartDone (when gather_facts: false).
 func (o *Output) HostStart(host, connType string) {
-	o.printf("\n%s %s", o.color(colorBold, "HOST"), host+" ["+connType+"]")
+	o.hostLabel = host + " [" + connType + "]"
+	o.printf("\n%s %s", o.color(colorBold, "HOST"), o.hostLabel)
 }
 
-// HostFactsResult appends fact-gathering status to the open HostStart
-// banner. On failure the error message is printed on a follow-up line via
-// Error so it picks up the standard red-error formatting.
-func (o *Output) HostFactsResult(_ string, ok bool, errMsg string) {
-	if ok {
-		o.printf(" - gathering facts %s\n", o.color(colorGreen, "✓"))
-		return
+// factsBanner returns the full "HOST <label> - gathering facts" line prefix
+// used by the spinner and the final fact-result line.
+func (o *Output) factsBanner() string {
+	return fmt.Sprintf("%s %s - gathering facts", o.color(colorBold, "HOST"), o.hostLabel)
+}
+
+// HostFactsStart signals that fact-gathering has begun on the open HostStart
+// banner. In interactive mode it completes the line to
+// "HOST <label> - gathering facts" and animates a spinner until
+// HostFactsResult; otherwise it is a no-op (HostFactsResult prints the whole
+// suffix in one shot, preserving plain/buffered output).
+func (o *Output) HostFactsStart(_ string) {
+	if o.spinnerOn() {
+		o.startLineSpinner(o.factsBanner())
 	}
-	o.printf(" - gathering facts %s\n", o.color(colorRed, "✗"))
-	if errMsg != "" {
+}
+
+// HostFactsResult closes the fact-gathering banner with a ✓/✗. When a spinner
+// is running it stops it and reprints the whole line in place; otherwise it
+// appends the suffix to the open HostStart line. On failure the error message
+// is printed on a follow-up line via Error.
+func (o *Output) HostFactsResult(_ string, ok bool, errMsg string) {
+	mark := o.color(colorGreen, "✓")
+	if !ok {
+		mark = o.color(colorRed, "✗")
+	}
+	if o.spin != nil {
+		o.stopSpinner()
+		o.printf("\r%s %s\033[K\n", o.factsBanner(), mark)
+	} else {
+		o.printf(" - gathering facts %s\n", mark)
+	}
+	if !ok && errMsg != "" {
 		o.Error("%s", errMsg)
 	}
 }

@@ -807,6 +807,7 @@ func (e *Executor) preparePlayContext(ctx context.Context, play *playbook.Play, 
 		}
 
 		if e.shouldGatherFacts(play) {
+			emitter.HostFactsStart(host)
 			f, err := facts.Gather(ctx, conn)
 			if err != nil {
 				emitter.HostFactsResult(host, false, err.Error())

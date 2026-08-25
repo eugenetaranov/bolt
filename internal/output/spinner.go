@@ -17,6 +17,23 @@ type spinner struct {
 // startSpinner renders an animated frame followed by name on the current line,
 // updating in place until stopSpinner is called. Only used in interactive mode.
 func (o *Output) startSpinner(name string) {
+	o.startSpinnerRender(func(frame string) string {
+		return fmt.Sprintf("\r  %s %s\033[K", frame, name)
+	})
+}
+
+// startLineSpinner animates a spinner at the END of prefix, rewriting the whole
+// line in place. Used for the host fact-gathering banner
+// ("HOST h [ssh] - gathering facts ⠋"). Only used in interactive mode.
+func (o *Output) startLineSpinner(prefix string) {
+	o.startSpinnerRender(func(frame string) string {
+		return fmt.Sprintf("\r%s %s\033[K", prefix, frame)
+	})
+}
+
+// startSpinnerRender runs the spinner animation loop, writing render(frame)
+// each tick until stopSpinner is called. frame is the colored glyph.
+func (o *Output) startSpinnerRender(render func(frame string) string) {
 	s := &spinner{stop: make(chan struct{}), done: make(chan struct{})}
 	o.spin = s
 	go func() {
@@ -24,7 +41,7 @@ func (o *Output) startSpinner(name string) {
 		t := time.NewTicker(90 * time.Millisecond)
 		defer t.Stop()
 		for i := 0; ; i++ {
-			fmt.Fprintf(o.w, "\r  %s %s\033[K", o.color(colorCyan, spinnerFrames[i%len(spinnerFrames)]), name)
+			fmt.Fprint(o.w, render(o.color(colorCyan, spinnerFrames[i%len(spinnerFrames)])))
 			select {
 			case <-s.stop:
 				return

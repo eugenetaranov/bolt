@@ -94,6 +94,10 @@ func (j *JSONEmitter) HostStart(host, connType string) {
 	})
 }
 
+// HostFactsStart is a no-op in JSON mode — the host_facts event emitted by
+// HostFactsResult already records the outcome; there's no spinner to animate.
+func (j *JSONEmitter) HostFactsStart(_ string) {}
+
 // HostFactsResult emits a host_facts event recording the outcome of
 // fact-gathering for the current host. JSON consumers used to derive this
 // from the legacy "Gathering Facts" task_start/task_result pair; the new

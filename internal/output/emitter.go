@@ -20,6 +20,10 @@ type Emitter interface {
 	// gather_facts is false). Other emitters may treat HostStart as a single
 	// terminating line.
 	HostStart(host, connType string)
+	// HostFactsStart signals that fact-gathering has begun on the open
+	// HostStart banner. Interactive text emitters complete the line and start
+	// a live spinner; other emitters may treat it as a no-op.
+	HostFactsStart(host string)
 	// HostFactsResult appends fact-gathering status to the open HostStart
 	// banner and terminates the line. On failure, errMsg is rendered on a
 	// follow-up line via the emitter's standard error path.
