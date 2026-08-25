@@ -148,6 +148,30 @@ func init() {
 	rootCmd.AddCommand(inventoryCmd)
 	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(ssmBucketCmd)
+	rootCmd.AddCommand(spinnerPreviewCmd)
+}
+
+// spinnerPreviewCmd animates each spinner style so you can preview them in a
+// terminal. Hidden — it's a dev/preview aid, not part of the normal workflow.
+var spinnerPreviewCmd = &cobra.Command{
+	Use:    "spinner-preview",
+	Short:  "Preview spinner styles (dots, shimmer)",
+	Hidden: true,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		o := output.New(os.Stdout)
+		if noColor {
+			o.SetColor(false)
+		}
+		for _, style := range []string{"dots", "shimmer"} {
+			o.SetSpinnerStyle(style)
+			o.Section(style)
+			o.TaskStart("Gathering facts on 192.168.1.113", "")
+			time.Sleep(2500 * time.Millisecond)
+			o.TaskResult("Gathering facts on 192.168.1.113", "changed", true, "facts gathered", nil)
+		}
+		fmt.Println("\nSet TACK_SPINNER=shimmer to use the shimmer style in runs.")
+		return nil
+	},
 }
 
 // runCmd executes a playbook

@@ -48,6 +48,7 @@ type Output struct {
 	interactive bool
 	spin        *spinner
 	hostLabel   string // "host [conn]" of the open HostStart banner
+	spinStyle   string // "" / "dots" (default braille) or "shimmer" (color sweep)
 }
 
 // New creates a new output handler. When w is a terminal, task execution is
@@ -60,7 +61,13 @@ func New(w io.Writer) *Output {
 	if f, ok := w.(*os.File); ok {
 		o.interactive = term.IsTerminal(int(f.Fd()))
 	}
+	o.spinStyle = os.Getenv("TACK_SPINNER") // "shimmer" for the color-sweep style
 	return o
+}
+
+// SetSpinnerStyle overrides the spinner style ("dots" or "shimmer").
+func (o *Output) SetSpinnerStyle(style string) {
+	o.spinStyle = style
 }
 
 // spinnerOn reports whether live spinner animation should be used. Requires an
