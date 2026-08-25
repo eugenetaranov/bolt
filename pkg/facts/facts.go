@@ -56,6 +56,16 @@ else
     _def_ip=$(echo "$_route" | sed -n 's/.* src \([^ ]*\).*/\1/p')
     [ -n "$_def_iface" ] && echo "TACK_FACT default_interface=$_def_iface"
     [ -n "$_def_ip" ] && echo "TACK_FACT default_ipv4=$_def_ip"
+    # Subnet of the default interface (the kernel already computed the network
+    # CIDR for its link-scope route, so no host-bit masking is needed here).
+    if [ -n "$_def_iface" ]; then
+      _subnet=$(ip route show dev "$_def_iface" proto kernel scope link 2>/dev/null | awk '$1 ~ /\// {print $1; exit}')
+      if [ -n "$_subnet" ]; then
+        echo "TACK_FACT default_ipv4_subnet=$_subnet"
+        _prefix=${_subnet#*/}
+        [ "$_prefix" != "$_subnet" ] && echo "TACK_FACT default_ipv4_prefix=$_prefix"
+      fi
+    fi
   fi
   _all4=$(ip -4 addr show 2>/dev/null | awk '/inet /{split($2,a,"/"); if(a[1]!="127.0.0.1")printf sep a[1]; sep=","}')
   [ -n "$_all4" ] && echo "TACK_FACT all_ipv4=$_all4"
@@ -174,7 +184,7 @@ func Gather(ctx context.Context, conn connector.Connector) (map[string]any, erro
 			facts["os_version"] = value
 		case "os_name":
 			facts["os_name"] = value
-		case "default_ipv4", "default_interface":
+		case "default_ipv4", "default_interface", "default_ipv4_subnet", "default_ipv4_prefix":
 			if value != "" {
 				facts[key] = value
 			}

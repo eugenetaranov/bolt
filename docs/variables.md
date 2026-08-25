@@ -164,6 +164,8 @@ When `gather_facts: true` (the default), Tack collects system information.
 |------|-------------|---------------|
 | `facts.default_ipv4` | Primary IPv4 address | `10.0.0.5` |
 | `facts.default_interface` | Default network interface | `eth0`, `en0` |
+| `facts.default_ipv4_subnet` | Subnet (CIDR) of the default interface (Linux) | `10.0.0.0/24` |
+| `facts.default_ipv4_prefix` | Prefix length of the default subnet (Linux) | `24` |
 | `facts.all_ipv4` | All non-loopback IPv4 addresses (list) | `[10.0.0.5, 172.17.0.1]` |
 | `facts.all_ipv6` | All global IPv6 addresses (list) | `[2001:db8::1]` |
 

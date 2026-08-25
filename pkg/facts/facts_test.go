@@ -44,6 +44,8 @@ func TestGather_Linux(t *testing.T) {
 		"TACK_FACT env_SHELL=/bin/bash",
 		"TACK_FACT default_interface=eth0",
 		"TACK_FACT default_ipv4=10.0.0.5",
+		"TACK_FACT default_ipv4_subnet=10.0.0.0/24",
+		"TACK_FACT default_ipv4_prefix=24",
 		"TACK_FACT all_ipv4=10.0.0.5,172.17.0.1",
 		"TACK_FACT all_ipv6=2001:db8::1",
 	}, "\n")
@@ -97,6 +99,12 @@ func TestGather_Linux(t *testing.T) {
 	}
 	if facts["default_ipv4"] != "10.0.0.5" {
 		t.Errorf("default_ipv4 = %q, want 10.0.0.5", facts["default_ipv4"])
+	}
+	if facts["default_ipv4_subnet"] != "10.0.0.0/24" {
+		t.Errorf("default_ipv4_subnet = %q, want 10.0.0.0/24", facts["default_ipv4_subnet"])
+	}
+	if facts["default_ipv4_prefix"] != "24" {
+		t.Errorf("default_ipv4_prefix = %q, want 24", facts["default_ipv4_prefix"])
 	}
 	allIPv4, ok := facts["all_ipv4"].([]string)
 	if !ok || len(allIPv4) != 2 {

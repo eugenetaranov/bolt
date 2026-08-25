@@ -1087,6 +1087,8 @@ format unchanged.
 |-------------------|------------------|---------------------------|
 | default_interface | "eth0", "en0"    | Default network interface |
 | default_ipv4      | "10.0.1.50"      | Default IPv4 address      |
+| default_ipv4_subnet | "10.0.1.0/24"  | Default iface subnet CIDR (Linux) |
+| default_ipv4_prefix | "24"           | Default subnet prefix len (Linux) |
 | all_ipv4          | "10.0.1.50,..."  | All non-localhost IPv4    |
 | all_ipv6          | "2001:db8::1,..." | All global IPv6          |
 
