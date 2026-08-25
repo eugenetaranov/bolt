@@ -269,6 +269,11 @@ type PlayContext struct {
 	// each host gets its own buffered emitter.
 	Output output.Emitter
 
+	// OnPlanLine, when set, is called with each planned task as it is
+	// computed during the plan phase, enabling streaming plan output. Nil
+	// disables streaming (the plan is rendered in one batch instead).
+	OnPlanLine func(output.PlannedTask)
+
 	// PlaybookDir is the directory of the playbook file, used for
 	// resolving relative include paths.
 	PlaybookDir string
@@ -839,7 +844,7 @@ func (e *Executor) preparePlayContext(ctx context.Context, play *playbook.Play, 
 func (e *Executor) computeHostPlan(ctx context.Context, pctx *PlayContext, allTasks, allHandlers []*playbook.Task) []output.PlannedTask {
 	planned := e.planTasks(ctx, pctx, allTasks, pctx.Output)
 	if len(allHandlers) > 0 {
-		planned = append(planned, e.planHandlers(pctx.Host, allTasks, planned, allHandlers)...)
+		planned = append(planned, e.planHandlers(pctx, allTasks, planned, allHandlers)...)
 	}
 	return planned
 }
@@ -870,8 +875,19 @@ func (e *Executor) runPlayOnHost(ctx context.Context, play *playbook.Play, stats
 	}
 
 	// --- Plan phase ---
-	planned := e.computeHostPlan(ctx, pctx, allTasks, allHandlers)
-	emitter.DisplayPlan(planned, e.DryRun)
+	// Text output streams each planned task as its check completes; other
+	// emitters (JSON, buffered) render the plan in one batch.
+	var planned []output.PlannedTask
+	if streamer, ok := emitter.(*output.Output); ok {
+		streamer.PlanStart(e.DryRun)
+		pctx.OnPlanLine = streamer.PlanLine
+		planned = e.computeHostPlan(ctx, pctx, allTasks, allHandlers)
+		pctx.OnPlanLine = nil
+		streamer.PlanEnd(planned, e.DryRun)
+	} else {
+		planned = e.computeHostPlan(ctx, pctx, allTasks, allHandlers)
+		emitter.DisplayPlan(planned, e.DryRun)
+	}
 
 	// Dry run stops after showing the plan, but assert failures still fail
 	// the play so preconditions fail-fast regardless of mode.
@@ -1623,6 +1639,14 @@ func (e *Executor) planTasks(ctx context.Context, pctx *PlayContext, tasks []*pl
 		inheritedBlockTags = blockTags[0]
 	}
 	var plan []output.PlannedTask
+	// record appends a planned task and streams it (when OnPlanLine is set) so
+	// the plan can render each line as its check completes.
+	record := func(pt output.PlannedTask) {
+		plan = append(plan, pt)
+		if pctx.OnPlanLine != nil {
+			pctx.OnPlanLine(pt)
+		}
+	}
 
 	// Track which variable names are registered by preceding tasks,
 	// so we can detect conditions that depend on runtime results.
@@ -1641,7 +1665,7 @@ func (e *Executor) planTasks(ctx context.Context, pctx *PlayContext, tasks []*pl
 
 		// Role filtering in plan phase (mirrors applyHostPlan)
 		if !shouldRunRole(task.RoleName, e.Roles) {
-			plan = append(plan, output.PlannedTask{
+			record(output.PlannedTask{
 				Host:   pctx.Host,
 				Name:   task.String(),
 				Module: task.Module,
@@ -1657,7 +1681,7 @@ func (e *Executor) planTasks(ctx context.Context, pctx *PlayContext, tasks []*pl
 
 		// Tag filtering in plan phase
 		if !shouldRunTask(eTags, e.Tags, e.SkipTags) {
-			plan = append(plan, output.PlannedTask{
+			record(output.PlannedTask{
 				Host:   pctx.Host,
 				Name:   task.String(),
 				Module: task.Module,
@@ -1693,12 +1717,13 @@ func (e *Executor) planTasks(ctx context.Context, pctx *PlayContext, tasks []*pl
 					}
 				}
 			}
-			plan = append(plan, pt)
+			record(pt)
 			continue
 		}
 
 		// Handle block tasks in plan phase
 		if task.IsBlock() {
+			// planBlock streams its own lines via OnPlanLine.
 			plan = append(plan, e.planBlock(ctx, pctx, task, 0, registeredNames)...)
 			continue
 		}
@@ -1727,7 +1752,7 @@ func (e *Executor) planTasks(ctx context.Context, pctx *PlayContext, tasks []*pl
 			if task.Register != "" {
 				registeredNames[task.Register] = true
 			}
-			plan = append(plan, pt)
+			record(pt)
 			continue
 		}
 
@@ -1856,7 +1881,7 @@ func (e *Executor) planTasks(ctx context.Context, pctx *PlayContext, tasks []*pl
 			registeredNames[task.Register] = true
 		}
 
-		plan = append(plan, pt)
+		record(pt)
 	}
 
 	return plan
@@ -1870,6 +1895,12 @@ func (e *Executor) planBlock(ctx context.Context, pctx *PlayContext, task *playb
 	}
 
 	var plan []output.PlannedTask
+	record := func(pt output.PlannedTask) {
+		plan = append(plan, pt)
+		if pctx.OnPlanLine != nil {
+			pctx.OnPlanLine(pt)
+		}
+	}
 
 	blockName := task.String()
 	blockStatus := "will_run"
@@ -1893,7 +1924,7 @@ func (e *Executor) planBlock(ctx context.Context, pctx *PlayContext, task *playb
 	}
 
 	// Block header
-	plan = append(plan, output.PlannedTask{
+	record(output.PlannedTask{
 		Host:      pctx.Host,
 		Name:      "BLOCK: " + blockName,
 		Status:    blockStatus,
@@ -1909,22 +1940,33 @@ func (e *Executor) planBlock(ctx context.Context, pctx *PlayContext, task *playb
 	// Merge block tags for child tasks
 	childBlockTags := mergeBlockTags(parentBlockTags, task.Tags)
 
+	// planChild plans one child task/block at indent+1. For non-block children
+	// it suppresses streaming during the nested planTasks call, then re-emits
+	// each line with the corrected indent so a line is never streamed before
+	// its indent is set.
+	planChild := func(child *playbook.Task) {
+		if child.IsBlock() {
+			plan = append(plan, e.planBlock(ctx, pctx, child, indent+1, registeredNames, childBlockTags)...)
+			return
+		}
+		saved := pctx.OnPlanLine
+		pctx.OnPlanLine = nil
+		pts := e.planTasks(ctx, pctx, []*playbook.Task{child}, pctx.Output, childBlockTags)
+		pctx.OnPlanLine = saved
+		for i := range pts {
+			pts[i].Indent = indent + 1
+			record(pts[i])
+		}
+	}
+
 	// Plan block tasks
 	for _, bt := range task.Block {
-		if bt.IsBlock() {
-			plan = append(plan, e.planBlock(ctx, pctx, bt, indent+1, registeredNames, childBlockTags)...)
-		} else {
-			pts := e.planTasks(ctx, pctx, []*playbook.Task{bt}, pctx.Output, childBlockTags)
-			for i := range pts {
-				pts[i].Indent = indent + 1
-			}
-			plan = append(plan, pts...)
-		}
+		planChild(bt)
 	}
 
 	// Plan rescue tasks if present
 	if len(task.Rescue) > 0 {
-		plan = append(plan, output.PlannedTask{
+		record(output.PlannedTask{
 			Host:      pctx.Host,
 			Name:      "RESCUE: " + blockName,
 			Status:    "conditional",
@@ -1932,21 +1974,13 @@ func (e *Executor) planBlock(ctx context.Context, pctx *PlayContext, task *playb
 			IsSection: true,
 		})
 		for _, rt := range task.Rescue {
-			if rt.IsBlock() {
-				plan = append(plan, e.planBlock(ctx, pctx, rt, indent+1, registeredNames, childBlockTags)...)
-			} else {
-				pts := e.planTasks(ctx, pctx, []*playbook.Task{rt}, pctx.Output, childBlockTags)
-				for i := range pts {
-					pts[i].Indent = indent + 1
-				}
-				plan = append(plan, pts...)
-			}
+			planChild(rt)
 		}
 	}
 
 	// Plan always tasks if present
 	if len(task.Always) > 0 {
-		plan = append(plan, output.PlannedTask{
+		record(output.PlannedTask{
 			Host:      pctx.Host,
 			Name:      "ALWAYS: " + blockName,
 			Status:    "will_run",
@@ -1954,15 +1988,7 @@ func (e *Executor) planBlock(ctx context.Context, pctx *PlayContext, task *playb
 			IsSection: true,
 		})
 		for _, at := range task.Always {
-			if at.IsBlock() {
-				plan = append(plan, e.planBlock(ctx, pctx, at, indent+1, registeredNames, childBlockTags)...)
-			} else {
-				pts := e.planTasks(ctx, pctx, []*playbook.Task{at}, pctx.Output, childBlockTags)
-				for i := range pts {
-					pts[i].Indent = indent + 1
-				}
-				plan = append(plan, pts...)
-			}
+			planChild(at)
 		}
 	}
 
@@ -1983,7 +2009,7 @@ func (e *Executor) conditionReferencesRegistered(condition string, registered ma
 // planHandlers produces plan entries for notifiable handlers.
 // It uses task definitions and their plan results to determine whether
 // any notifying task would actually produce a change.
-func (e *Executor) planHandlers(host string, tasks []*playbook.Task, taskPlan []output.PlannedTask, handlers []*playbook.Task) []output.PlannedTask {
+func (e *Executor) planHandlers(pctx *PlayContext, tasks []*playbook.Task, taskPlan []output.PlannedTask, handlers []*playbook.Task) []output.PlannedTask {
 	// Build a set of handler names that could potentially be notified.
 	// A handler could be notified if at least one task that lists it in
 	// notify has a plan status that implies change (will_change, always_runs,
@@ -2009,13 +2035,17 @@ func (e *Executor) planHandlers(host string, tasks []*playbook.Task, taskPlan []
 		if !maybeNotified[h.Name] {
 			continue
 		}
-		plan = append(plan, output.PlannedTask{
-			Host:   host,
+		pt := output.PlannedTask{
+			Host:   pctx.Host,
 			Name:   h.String(),
 			Module: h.Module,
 			Status: "conditional",
 			Reason: "notified",
-		})
+		}
+		plan = append(plan, pt)
+		if pctx.OnPlanLine != nil {
+			pctx.OnPlanLine(pt)
+		}
 	}
 	return plan
 }

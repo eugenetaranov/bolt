@@ -352,103 +352,145 @@ type PlannedTask struct {
 
 // DisplayPlan renders the plan table showing what tasks will run.
 func (o *Output) DisplayPlan(tasks []PlannedTask, dryRun bool) {
+	o.PlanStart(dryRun)
+	for _, t := range tasks {
+		o.PlanLine(t)
+	}
+	o.PlanEnd(tasks, dryRun)
+}
+
+// isFilteredPlanSkip reports whether a task was excluded by a --tags/--skip-tags
+// selection. These are omitted from the human-readable plan and reported only as
+// a count in the summary, since the user explicitly asked to run a tag subset.
+// (Role filtering is left visible — see TestRolesFilterReportsSkippedInPlan.)
+func isFilteredPlanSkip(t PlannedTask) bool {
+	return t.Status == "will_skip" && t.Reason == "skipped (tag)"
+}
+
+// PlanStart prints the plan header. Part of the streaming plan API
+// (PlanStart → PlanLine* → PlanEnd) that lets the executor emit each planned
+// task as its check completes; DisplayPlan wraps these for batch callers.
+func (o *Output) PlanStart(dryRun bool) {
 	label := "PLAN"
 	if dryRun {
 		label = "PLAN (dry run)"
 	}
 	o.printf("\n%s\n", o.color(colorBold, label))
+}
 
-	var willRun, willSkip, conditional, willChange, noChange, alwaysRuns int
+// PlanLine renders one planned task. Tasks filtered out by the user's
+// --tags/--roles selection are omitted (counted in the summary instead).
+func (o *Output) PlanLine(t PlannedTask) {
+	if isFilteredPlanSkip(t) {
+		return
+	}
+	o.renderPlanTask(t)
+}
+
+// renderPlanTask prints a single planned task line plus its params and diff.
+func (o *Output) renderPlanTask(t PlannedTask) {
+	var indicator, col string
+	switch t.Status {
+	case "will_change":
+		indicator, col = "+", colorYellow
+	case "no_change":
+		indicator, col = "=", colorGreen
+	case "always_runs":
+		indicator, col = "~", colorYellow
+	case "will_run":
+		indicator, col = "+", colorYellow
+	case "will_skip":
+		indicator, col = "○", colorCyan
+	case "conditional":
+		indicator, col = "?", colorYellow
+	}
+
+	module := ""
+	if t.Module != "" {
+		module = fmt.Sprintf("%s: ", t.Module)
+	}
+
+	suffix := ""
+	if t.Status == "will_skip" && t.Reason != "" {
+		suffix = t.Reason
+	} else if t.Status == "conditional" && t.Reason != "" {
+		suffix = fmt.Sprintf("when: %s", t.Reason)
+	} else if t.Status == "no_change" && t.Reason != "" {
+		suffix = t.Reason
+	} else if t.Status == "always_runs" && t.Reason != "" {
+		suffix = t.Reason
+	} else if t.Status == "will_change" && t.Reason != "" {
+		suffix = t.Reason
+	}
+	if t.LoopCount > 0 {
+		if suffix != "" {
+			suffix += " "
+		}
+		suffix += fmt.Sprintf("%d items", t.LoopCount)
+	}
+
+	// Section headers (block/rescue/always) get special rendering.
+	if t.IsSection {
+		indent := strings.Repeat("  ", t.Indent)
+		o.printf("%s%s\n", indent, o.color(colorBold, t.Name))
+		return
+	}
+
+	indent := strings.Repeat("  ", t.Indent)
+	line := fmt.Sprintf("%s  %s %s%s", indent, indicator, module, t.Name)
+	if suffix != "" {
+		line += " - " + suffix
+	}
+	o.printf("%s%s\n", o.color(col, strings.TrimRight(line, " ")), o.tagSuffix(t.Tags))
+
+	// Show task parameters.
+	paramIndent := strings.Repeat("  ", t.Indent) + "      "
+	for _, paramLine := range formatTaskParams(t.Module, t.Params) {
+		o.printf("%s%s\n", paramIndent, o.color(colorGray, paramLine))
+	}
+
+	// Show checksums or diff when content differs.
+	showDiff := o.verbose || o.diff
+	destPath := extractDestPath(t.Module, t.Params)
+
+	if t.OldChecksum != "" && t.NewChecksum != "" && t.OldChecksum != t.NewChecksum {
+		if showDiff && t.OldContent != "" && t.NewContent != "" {
+			o.printDiff(destPath, destPath, t.OldContent, t.NewContent)
+		} else {
+			o.printf("      %s\n", o.color(colorRed, "old: "+t.OldChecksum))
+			o.printf("      %s\n", o.color(colorGreen, "new: "+t.NewChecksum))
+		}
+	} else if t.OldChecksum == "" && t.NewChecksum != "" {
+		if showDiff && t.NewContent != "" {
+			o.printDiff("/dev/null", destPath, "", t.NewContent)
+		} else {
+			o.printf("      %s\n", o.color(colorYellow, "new: "+t.NewChecksum))
+		}
+	}
+}
+
+// PlanEnd prints the summary footer. Filtered (tag/role) tasks are reported as
+// "N filtered" rather than counted toward "to skip".
+func (o *Output) PlanEnd(tasks []PlannedTask, _ bool) {
+	var willRun, willSkip, conditional, willChange, noChange, alwaysRuns, filtered int
 	for _, t := range tasks {
-		var indicator, col string
-		switch t.Status {
-		case "will_change":
-			indicator = "+"
-			col = colorYellow
-			willChange++
-		case "no_change":
-			indicator = "="
-			col = colorGreen
-			noChange++
-		case "always_runs":
-			indicator = "~"
-			col = colorYellow
-			alwaysRuns++
-		case "will_run":
-			indicator = "+"
-			col = colorYellow
-			willRun++
-		case "will_skip":
-			indicator = "○"
-			col = colorCyan
-			willSkip++
-		case "conditional":
-			indicator = "?"
-			col = colorYellow
-			conditional++
-		}
-
-		module := ""
-		if t.Module != "" {
-			module = fmt.Sprintf("%s: ", t.Module)
-		}
-
-		suffix := ""
-		if t.Status == "will_skip" && t.Reason != "" {
-			suffix = t.Reason
-		} else if t.Status == "conditional" && t.Reason != "" {
-			suffix = fmt.Sprintf("when: %s", t.Reason)
-		} else if t.Status == "no_change" && t.Reason != "" {
-			suffix = t.Reason
-		} else if t.Status == "always_runs" && t.Reason != "" {
-			suffix = t.Reason
-		} else if t.Status == "will_change" && t.Reason != "" {
-			suffix = t.Reason
-		}
-		if t.LoopCount > 0 {
-			if suffix != "" {
-				suffix += " "
-			}
-			suffix += fmt.Sprintf("%d items", t.LoopCount)
-		}
-
-		// Section headers (block/rescue/always) get special rendering
-		if t.IsSection {
-			indent := strings.Repeat("  ", t.Indent)
-			o.printf("%s%s\n", indent, o.color(colorBold, t.Name))
+		if isFilteredPlanSkip(t) {
+			filtered++
 			continue
 		}
-
-		indent := strings.Repeat("  ", t.Indent)
-		line := fmt.Sprintf("%s  %s %s%s", indent, indicator, module, t.Name)
-		if suffix != "" {
-			line += " - " + suffix
-		}
-		o.printf("%s%s\n", o.color(col, strings.TrimRight(line, " ")), o.tagSuffix(t.Tags))
-
-		// Show task parameters
-		paramIndent := strings.Repeat("  ", t.Indent) + "      "
-		for _, paramLine := range formatTaskParams(t.Module, t.Params) {
-			o.printf("%s%s\n", paramIndent, o.color(colorGray, paramLine))
-		}
-
-		// Show checksums or diff when content differs
-		showDiff := o.verbose || o.diff
-		destPath := extractDestPath(t.Module, t.Params)
-
-		if t.OldChecksum != "" && t.NewChecksum != "" && t.OldChecksum != t.NewChecksum {
-			if showDiff && t.OldContent != "" && t.NewContent != "" {
-				o.printDiff(destPath, destPath, t.OldContent, t.NewContent)
-			} else {
-				o.printf("      %s\n", o.color(colorRed, "old: "+t.OldChecksum))
-				o.printf("      %s\n", o.color(colorGreen, "new: "+t.NewChecksum))
-			}
-		} else if t.OldChecksum == "" && t.NewChecksum != "" {
-			if showDiff && t.NewContent != "" {
-				o.printDiff("/dev/null", destPath, "", t.NewContent)
-			} else {
-				o.printf("      %s\n", o.color(colorYellow, "new: "+t.NewChecksum))
-			}
+		switch t.Status {
+		case "will_change":
+			willChange++
+		case "no_change":
+			noChange++
+		case "always_runs":
+			alwaysRuns++
+		case "will_run":
+			willRun++
+		case "will_skip":
+			willSkip++
+		case "conditional":
+			conditional++
 		}
 	}
 
@@ -468,6 +510,9 @@ func (o *Output) DisplayPlan(tasks []PlannedTask, dryRun bool) {
 	}
 	if willSkip > 0 {
 		summaryParts = append(summaryParts, fmt.Sprintf("%d to skip", willSkip))
+	}
+	if filtered > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d filtered", filtered))
 	}
 	if len(summaryParts) == 0 {
 		summaryParts = append(summaryParts, "nothing to do")
