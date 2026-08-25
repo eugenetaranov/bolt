@@ -161,3 +161,21 @@ func TestAutoApproveFlags(t *testing.T) {
 		t.Error("-y should be resolvable")
 	}
 }
+
+func TestSudoNoPrompt_AutoApproveDoesNotSuppress(t *testing.T) {
+	// Interactive TTY, no explicit opt-out -> must prompt (so `-sa` works).
+	if sudoNoPrompt(false, false, true) {
+		t.Error("interactive with no opt-out should NOT skip the sudo prompt")
+	}
+	// Explicit opt-outs still skip.
+	if !sudoNoPrompt(true, false, true) {
+		t.Error("--no-sudo-prompt should skip")
+	}
+	if !sudoNoPrompt(false, true, true) {
+		t.Error("TACK_SUDO_NO_PROMPT should skip")
+	}
+	// Non-TTY (CI / piped) skips.
+	if !sudoNoPrompt(false, false, false) {
+		t.Error("non-TTY should skip")
+	}
+}
