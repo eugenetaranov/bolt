@@ -25,6 +25,15 @@ type Module struct{}
 // Name returns the module identifier.
 func (m *Module) Name() string { return "git" }
 
+// Example returns a usage example for the git module.
+func (m *Module) Example() string {
+	return `- name: Clone a repository
+  git:
+    repo: https://github.com/tackhq/tack.git
+    dest: /opt/tack
+    version: main`
+}
+
 // shaPattern matches a 7-40 char hex string (a SHA or abbreviated SHA).
 var shaPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 

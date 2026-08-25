@@ -23,6 +23,14 @@ func (m *Module) Name() string {
 	return "group"
 }
 
+// Example returns a usage example for the group module.
+func (m *Module) Example() string {
+	return `- name: Ensure a group exists
+  group:
+    name: deploy
+    state: present`
+}
+
 // groupInfo holds the current state of a group.
 type groupInfo struct {
 	Exists bool

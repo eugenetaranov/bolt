@@ -22,6 +22,36 @@ func (m *Module) Name() string {
 	return "command"
 }
 
+// Description returns a short summary of the command module.
+func (m *Module) Description() string {
+	return "Run an arbitrary command on the target. Not idempotent unless 'creates' or 'removes' is set."
+}
+
+// Parameters returns the parameter documentation for the command module.
+func (m *Module) Parameters() []module.ParamDoc {
+	return []module.ParamDoc{
+		{Name: "cmd", Type: "string", Required: true, Description: "The command to execute"},
+		{Name: "chdir", Type: "string", Description: "Change to this directory before running"},
+		{Name: "creates", Type: "string", Description: "Skip if this file/path exists (idempotency)"},
+		{Name: "removes", Type: "string", Description: "Only run if this file/path exists (idempotency)"},
+		{Name: "changed_when", Type: "string", Description: "Shell expression; task reports changed only when it exits 0"},
+	}
+}
+
+// Example returns a usage example for the command module.
+func (m *Module) Example() string {
+	return `- name: Run a one-off command
+  command:
+    cmd: /usr/local/bin/bootstrap.sh
+    creates: /var/lib/bootstrap.done`
+}
+
+// Ensure Module implements the documentation interfaces.
+var (
+	_ module.Describer = (*Module)(nil)
+	_ module.Exampler  = (*Module)(nil)
+)
+
 // Run executes the command module.
 //
 // Parameters:

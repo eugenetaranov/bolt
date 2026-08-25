@@ -31,6 +31,14 @@ func (m *Module) Name() string {
 	return "yum"
 }
 
+// Example returns a usage example for the yum module.
+func (m *Module) Example() string {
+	return `- name: Install nginx
+  yum:
+    name: nginx
+    state: present`
+}
+
 // Run executes the yum module.
 //
 // Parameters:
