@@ -16,10 +16,10 @@ import (
 
 	sshconfig "github.com/kevinburke/ssh_config"
 	"github.com/pkg/sftp"
+	kh "github.com/skeema/knownhosts"
 	"github.com/tackhq/tack/internal/connector"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // Default SSH settings.
@@ -158,28 +158,34 @@ func (c *Connector) Connect(ctx context.Context) error {
 		return fmt.Errorf("no SSH authentication methods available for %s", c.host)
 	}
 
-	// Build host key callback
-	var hostKeyCallback ssh.HostKeyCallback
-	if c.insecureHostKey {
-		hostKeyCallback = ssh.InsecureIgnoreHostKey()
-	} else {
-		var err error
-		hostKeyCallback, err = buildHostKeyCallback()
-		if err != nil {
-			// Fall back to insecure if known_hosts is unavailable
-			fmt.Fprintf(os.Stderr, "WARNING: could not parse known_hosts (%v); SSH host key verification is disabled\n", err)
-			hostKeyCallback = ssh.InsecureIgnoreHostKey()
-		}
-	}
+	addr := net.JoinHostPort(c.hostname, strconv.Itoa(c.port))
 
 	config := &ssh.ClientConfig{
-		User:            c.user,
-		Auth:            authMethods,
-		HostKeyCallback: hostKeyCallback,
-		Timeout:         c.timeout,
+		User:    c.user,
+		Auth:    authMethods,
+		Timeout: c.timeout,
 	}
 
-	addr := net.JoinHostPort(c.hostname, strconv.Itoa(c.port))
+	// Build host key verification.
+	if c.insecureHostKey {
+		config.HostKeyCallback = ssh.InsecureIgnoreHostKey()
+	} else {
+		cb, algos, err := knownHostsConfig(addr)
+		if err != nil {
+			// Fall back to insecure if known_hosts is unavailable.
+			fmt.Fprintf(os.Stderr, "WARNING: could not parse known_hosts (%v); SSH host key verification is disabled\n", err)
+			config.HostKeyCallback = ssh.InsecureIgnoreHostKey()
+		} else {
+			config.HostKeyCallback = cb
+			// Restrict host-key negotiation to the algorithms actually pinned
+			// for this host, matching OpenSSH. Without this the server may
+			// present a key type absent from known_hosts (x/crypto's default
+			// order deprioritizes ed25519), causing a spurious "key mismatch".
+			if len(algos) > 0 {
+				config.HostKeyAlgorithms = algos
+			}
+		}
+	}
 
 	// Dial with context support
 	dialer := net.Dialer{Timeout: c.timeout}
@@ -193,6 +199,11 @@ func (c *Connector) Connect(ctx context.Context) error {
 	if err != nil {
 		conn.Close()
 		msg := fmt.Sprintf("SSH handshake failed for %s (user=%s): %v", addr, c.user, err)
+		if strings.Contains(err.Error(), "knownhosts: key mismatch") {
+			msg += fmt.Sprintf("\n  the host key for %s does not match ~/.ssh/known_hosts.\n"+
+				"  if you trust this host (e.g. it was reinstalled), remove the stale entry and reconnect:\n"+
+				"    ssh-keygen -R %s", c.hostname, c.hostname)
+		}
 		if len(c.authWarnings) > 0 {
 			msg += "\n  auth warnings:"
 			for _, w := range c.authWarnings {
@@ -597,10 +608,18 @@ func (c *Connector) getSFTPClient() (*sftp.Client, error) {
 	return client, nil
 }
 
-// buildHostKeyCallback creates a known_hosts callback from ~/.ssh/known_hosts.
-func buildHostKeyCallback() (ssh.HostKeyCallback, error) {
+// knownHostsConfig returns a host-key callback and the host-key algorithms
+// pinned for addr in ~/.ssh/known_hosts. Scoping the ClientConfig's
+// HostKeyAlgorithms to these (as OpenSSH does) ensures the server presents the
+// key type that is actually pinned, rather than whatever its default order
+// prefers. algos is empty when the host is not in known_hosts (first connect).
+func knownHostsConfig(addr string) (ssh.HostKeyCallback, []string, error) {
 	knownHostsPath := filepath.Join(homeDir(), ".ssh", "known_hosts")
-	return knownhosts.New(knownHostsPath)
+	db, err := kh.NewDB(knownHostsPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return db.HostKeyCallback(), db.HostKeyAlgorithms(addr), nil
 }
 
 // homeDir returns the current user's home directory.

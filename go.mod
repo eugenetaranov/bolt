@@ -14,6 +14,7 @@ require (
 	github.com/kevinburke/ssh_config v1.6.0
 	github.com/pkg/sftp v1.13.10
 	github.com/pmezard/go-difflib v1.0.0
+	github.com/skeema/knownhosts v1.3.2
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.40.0
