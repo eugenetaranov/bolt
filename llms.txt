@@ -722,6 +722,86 @@ or /etc/iptables/rules.v{4,6} (Debian/Ubuntu), /etc/sysconfig/{ip,ip6}tables
     state: absent
 ```
 
+### get_url
+
+Download a file onto the target (runs on the target via `curl`/`wget`), with
+optional checksum verification. Downloads to a temp file, verifies, then moves
+into place. Idempotent: skips when `dest` already matches.
+
+| Param    | Type   | Required | Default | Description                                       |
+|----------|--------|----------|---------|---------------------------------------------------|
+| url      | string | yes      | -       | Source URL                                        |
+| dest     | string | yes      | -       | Destination path on the target                    |
+| checksum | string | no       | ""      | "algo:hash" (sha256/sha512/sha1/md5; bare=sha256) |
+| mode     | string | no       | ""      | File mode, e.g. "0755"                            |
+| owner    | string | no       | ""      | Owner username                                    |
+| group    | string | no       | ""      | Group name                                        |
+| force    | bool   | no       | false   | Re-download even if dest exists                   |
+| timeout  | int    | no       | 0       | Max seconds for the transfer (0 = no cap)         |
+| headers  | map    | no       | {}      | Extra request headers                             |
+
+```yaml
+- name: Download a release tarball
+  get_url:
+    url: https://example.com/app-1.2.0.tar.gz
+    dest: /tmp/app-1.2.0.tar.gz
+    checksum: "sha256:<hash>"
+    mode: "0644"
+```
+
+### unarchive
+
+Extract a local archive on the target (extraction runs on the target via
+`tar`/`unzip`, preserving perms/symlinks). Formats by extension: `.zip`, `.tar`,
+`.tar.gz`/`.tgz`, `.tar.bz2`, `.tar.xz`, `.tar.zst`.
+
+| Param            | Type     | Required | Default | Description                              |
+|------------------|----------|----------|---------|------------------------------------------|
+| src              | string   | yes      | -       | Archive path on the target               |
+| dest             | string   | yes      | -       | Destination directory                    |
+| creates          | string   | no       | ""      | Skip extraction if this path exists      |
+| owner            | string   | no       | ""      | Owner applied to dest                    |
+| group            | string   | no       | ""      | Group applied to dest                    |
+| mode             | string   | no       | ""      | Mode applied to dest                     |
+| strip_components | int      | no       | 0       | Drop leading path components (tar only)  |
+| extra_opts       | []string | no       | []      | Extra flags passed to the extractor      |
+
+```yaml
+- name: Extract an application tarball
+  unarchive:
+    src: /tmp/app-1.2.0.tar.gz
+    dest: /opt/app
+    strip_components: 1
+    creates: /opt/app/bin/app
+```
+
+### make
+
+Build from source on the target (`configure` → `make` → install). Requires an
+idempotency guard (`creates` or `unless`) — without one it errors, so it never
+rebuilds on every run. Requires a build toolchain on the target.
+
+| Param     | Type        | Required | Default | Description                                 |
+|-----------|-------------|----------|---------|---------------------------------------------|
+| chdir     | string      | yes      | -       | Source directory to build in                |
+| configure | string      | no       | ""      | Configure command to run first              |
+| target    | string      | no       | ""      | make target                                 |
+| install   | bool/string | no       | -       | true => "make install"; string => verbatim  |
+| env       | map         | no       | {}      | Environment variables exported for steps    |
+| jobs      | int         | no       | 0       | Parallelism (-j)                            |
+| creates   | string      | cond     | ""      | Skip if this path exists (one guard req'd)  |
+| unless    | string      | cond     | ""      | Skip if this shell expr exits 0 (one req'd) |
+
+```yaml
+- name: Build and install from source
+  make:
+    chdir: /usr/local/src/app-1.2.0
+    configure: "./configure --prefix=/usr/local"
+    jobs: 4
+    install: true
+    creates: /usr/local/bin/app
+```
+
 ---
 
 ## CLI

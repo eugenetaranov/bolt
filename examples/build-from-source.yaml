@@ -1,0 +1,46 @@
+---
+# Example: install software from source using the fetch -> unpack -> build pipeline.
+#
+# get_url downloads on the target (via curl/wget), unarchive extracts on the
+# target (via tar/unzip), and make builds it. Every step is idempotent:
+# get_url skips when the checksum already matches, unarchive skips when `creates`
+# exists, and make skips when its `creates` guard is satisfied.
+#
+# NOTE (fleets): compiling on every host installs a toolchain on each target and
+# is non-reproducible. For fleets, prefer building once and deploying the
+# artifact (e.g. get_url a prebuilt binary or a .deb, then `apt: { deb: ... }`).
+# Building on-host as shown here is best for a single machine / homelab.
+- name: Install a tool from source
+  hosts: all
+  sudo: true
+  gather_facts: false
+  vars:
+    version: "1.2.0"
+    src_dir: /usr/local/src/app-1.2.0
+  tasks:
+    - name: Ensure build dependencies are present
+      apt:
+        name: [build-essential, curl, tar]
+        state: present
+        update_cache: true
+
+    - name: Download the release tarball
+      get_url:
+        url: "https://example.com/app-{{ version }}.tar.gz"
+        dest: "/tmp/app-{{ version }}.tar.gz"
+        checksum: "sha256:REPLACE_WITH_REAL_HASH"
+        mode: "0644"
+
+    - name: Extract the source
+      unarchive:
+        src: "/tmp/app-{{ version }}.tar.gz"
+        dest: /usr/local/src
+        creates: "{{ src_dir }}"
+
+    - name: Configure, build, and install
+      make:
+        chdir: "{{ src_dir }}"
+        configure: "./configure --prefix=/usr/local"
+        jobs: 4
+        install: true
+        creates: /usr/local/bin/app
