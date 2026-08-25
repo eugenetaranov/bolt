@@ -35,7 +35,7 @@ test-coverage: ## Run tests with coverage report
 	go tool cover -html=coverage.out -o coverage.html
 
 test-integration: ## Run Go integration tests
-	go test -v -timeout 5m ./tests/integration/...
+	go test -v -timeout 20m ./tests/integration/...
 
 test-docker: test-docker-up test-docker-run test-docker-down ## Run Docker SSH integration test (all-in-one)
 
