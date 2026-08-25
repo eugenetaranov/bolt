@@ -143,9 +143,11 @@ func TestResolvePlaybookRef_NoneFound(t *testing.T) {
 }
 
 func TestAutoApprove_ShorthandY(t *testing.T) {
+	// -y is retained as a backward-compatible alias (via --yes); -a is the
+	// primary shorthand for --auto-approve.
 	flag := runCmd.Flags().ShorthandLookup("y")
-	if flag == nil || flag.Name != "auto-approve" {
-		t.Fatal("expected -y to be the shorthand for --auto-approve on run")
+	if flag == nil || flag.Name != "yes" {
+		t.Fatal("expected -y to be retained as the --yes alias")
 	}
 }
 

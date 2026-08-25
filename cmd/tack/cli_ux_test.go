@@ -140,3 +140,24 @@ func TestAllModulesDocumented(t *testing.T) {
 		}
 	}
 }
+
+func TestAutoApproveFlags(t *testing.T) {
+	// -a is the primary shorthand for --auto-approve.
+	if f := runCmd.Flags().Lookup("auto-approve"); f == nil {
+		t.Fatal("expected --auto-approve flag")
+	} else if f.Shorthand != "a" {
+		t.Errorf("expected -a shorthand for --auto-approve, got %q", f.Shorthand)
+	}
+	// -y/--yes remains as a backward-compatible alias.
+	if y := runCmd.Flags().Lookup("yes"); y == nil {
+		t.Fatal("expected --yes alias flag")
+	} else if y.Shorthand != "y" {
+		t.Errorf("expected -y shorthand for --yes, got %q", y.Shorthand)
+	}
+	if runCmd.Flags().ShorthandLookup("a") == nil {
+		t.Error("-a should be resolvable")
+	}
+	if runCmd.Flags().ShorthandLookup("y") == nil {
+		t.Error("-y should be resolvable")
+	}
+}

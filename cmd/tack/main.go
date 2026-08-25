@@ -257,7 +257,8 @@ func init() {
 	runCmd.Flags().StringSliceP("roles", "r", nil, "Only run tasks from these roles")
 	// Connection override flags
 	addConnectionFlags(runCmd)
-	runCmd.Flags().BoolVarP(&autoApprove, "auto-approve", "y", false, "Skip interactive approval prompt (also via TACK_AUTO_APPROVE)")
+	runCmd.Flags().BoolVarP(&autoApprove, "auto-approve", "a", false, "Skip interactive approval prompt (also via TACK_AUTO_APPROVE)")
+	runCmd.Flags().BoolP("yes", "y", false, "Alias for --auto-approve")
 	runCmd.Flags().Bool("no-facts", false, "Skip gathering system facts; speeds up runs that don't depend on facts")
 	runCmd.Flags().Bool("no-plan", false, "Skip the plan preview and approval; apply immediately (ignored with --check/--dry-run)")
 	runCmd.Flags().IntP("forks", "f", 1, "Number of hosts to execute concurrently")
@@ -365,6 +366,11 @@ func runPlaybook(cmd *cobra.Command, args []string) error {
 	emitter, err := output.NewEmitter(outputMode)
 	if err != nil {
 		return err
+	}
+
+	// -y/--yes is an alias for --auto-approve.
+	if yes, _ := cmd.Flags().GetBool("yes"); yes {
+		autoApprove = true
 	}
 
 	// Env var fills in when the flag is not set.
