@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 )
 
 func planTestTasks() []PlannedTask {
@@ -65,5 +66,27 @@ func TestPlan_StreamingEqualsBatch(t *testing.T) {
 
 	if batch.String() != stream.String() {
 		t.Errorf("streaming output differs from batch:\nbatch:\n%q\nstream:\n%q", batch.String(), stream.String())
+	}
+}
+
+// TestPlanCheckThenLine verifies the plan-check spinner is cleared and replaced
+// by the resolved task line (interactive path).
+func TestPlanCheckThenLine(t *testing.T) {
+	var buf bytes.Buffer
+	o := New(&buf)
+	o.interactive = true
+	o.PlanCheck("Install nginx")
+	time.Sleep(120 * time.Millisecond) // let a spinner frame draw
+	o.PlanLine(PlannedTask{Name: "Install nginx", Module: "apt", Status: "will_change"})
+
+	got := buf.String()
+	if o.spin != nil {
+		t.Error("spinner should be stopped after PlanLine")
+	}
+	if !strings.Contains(got, "\r\033[K") {
+		t.Errorf("PlanLine should clear the check spinner line: %q", got)
+	}
+	if !strings.Contains(got, "Install nginx") {
+		t.Errorf("PlanLine should render the resolved task line: %q", got)
 	}
 }

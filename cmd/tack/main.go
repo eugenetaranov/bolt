@@ -30,15 +30,15 @@ import (
 	_ "github.com/tackhq/tack/internal/module/copy"
 	_ "github.com/tackhq/tack/internal/module/cron"
 	_ "github.com/tackhq/tack/internal/module/file"
-	_ "github.com/tackhq/tack/internal/module/git"
 	_ "github.com/tackhq/tack/internal/module/geturl"
+	_ "github.com/tackhq/tack/internal/module/git"
 	_ "github.com/tackhq/tack/internal/module/group"
 	_ "github.com/tackhq/tack/internal/module/iptables"
 	_ "github.com/tackhq/tack/internal/module/lineinfile"
 	_ "github.com/tackhq/tack/internal/module/make"
-	_ "github.com/tackhq/tack/internal/module/unarchive"
 	_ "github.com/tackhq/tack/internal/module/systemd"
 	_ "github.com/tackhq/tack/internal/module/template"
+	_ "github.com/tackhq/tack/internal/module/unarchive"
 	_ "github.com/tackhq/tack/internal/module/user"
 	_ "github.com/tackhq/tack/internal/module/waitfor"
 	_ "github.com/tackhq/tack/internal/module/yum"
@@ -155,21 +155,21 @@ func init() {
 // terminal. Hidden — it's a dev/preview aid, not part of the normal workflow.
 var spinnerPreviewCmd = &cobra.Command{
 	Use:    "spinner-preview",
-	Short:  "Preview spinner styles (dots, shimmer)",
+	Short:  "Preview spinner styles (dots, flower)",
 	Hidden: true,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		o := output.New(os.Stdout)
 		if noColor {
 			o.SetColor(false)
 		}
-		for _, style := range []string{"dots", "shimmer"} {
+		for _, style := range []string{"dots", "flower"} {
 			o.SetSpinnerStyle(style)
 			o.Section(style)
 			o.TaskStart("Gathering facts on 192.168.1.113", "")
-			time.Sleep(2500 * time.Millisecond)
+			time.Sleep(3 * time.Second)
 			o.TaskResult("Gathering facts on 192.168.1.113", "changed", true, "facts gathered", nil)
 		}
-		fmt.Println("\nSet TACK_SPINNER=shimmer to use the shimmer style in runs.")
+		fmt.Println("\nSet TACK_SPINNER=flower to use the flower style in runs.")
 		return nil
 	},
 }

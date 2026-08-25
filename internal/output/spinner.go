@@ -2,57 +2,34 @@ package output
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
 // spinnerFrames are the braille glyphs cycled while a task runs.
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// Bright ANSI colors used by the shimmer style (safe: shimmer only renders when
+// Bright ANSI colors used by the "flower" style (safe: it only renders when
 // spinnerOn(), which already requires color output).
 const (
-	colorBrightCyan  = "\033[96m"
-	colorBrightWhite = "\033[97m"
+	colorBrightCyan    = "\033[96m"
+	colorBrightWhite   = "\033[97m"
+	colorBrightMagenta = "\033[95m"
+	colorBrightYellow  = "\033[93m"
 )
 
-// shimmerWidth is the number of cells in the shimmer sweep.
-const shimmerWidth = 5
+// flowerFrames bloom a single glyph from a dot to an open flower/burst and back.
+var flowerFrames = []string{"·", "✢", "✦", "✳", "✺", "❋", "✺", "✳", "✦", "✢"}
 
-// glyph returns the animated spinner glyph for tick i in the active style.
+// sparkleColors cycle to give the flower a firework shimmer.
+var sparkleColors = []string{colorBrightCyan, colorBrightWhite, colorBrightMagenta, colorBrightYellow}
+
+// glyph returns the animated spinner glyph for tick i in the active style:
+// the default braille "dots", or "flower" — a blooming, color-cycling burst.
 func (o *Output) glyph(i int) string {
-	if o.spinStyle == "shimmer" {
-		return shimmerGlyph(i)
+	if o.spinStyle == "flower" {
+		return sparkleColors[(i/2)%len(sparkleColors)] + flowerFrames[i%len(flowerFrames)] + colorReset
 	}
 	return o.color(colorCyan, spinnerFrames[i%len(spinnerFrames)])
-}
-
-// shimmerGlyph renders a small row of cells with a bright "spark" that sweeps
-// back and forth, evoking a firework/flower shimmer (inspired by Claude Code's
-// color-sweep spinner).
-func shimmerGlyph(i int) string {
-	period := 2 * (shimmerWidth - 1)
-	p := i % period
-	head := p
-	if p >= shimmerWidth {
-		head = period - p // ping-pong back
-	}
-	var b strings.Builder
-	for c := 0; c < shimmerWidth; c++ {
-		d := head - c
-		if d < 0 {
-			d = -d
-		}
-		switch d {
-		case 0:
-			b.WriteString(colorBrightWhite + "✦" + colorReset)
-		case 1:
-			b.WriteString(colorBrightCyan + "•" + colorReset)
-		default:
-			b.WriteString(colorGray + "·" + colorReset)
-		}
-	}
-	return b.String()
 }
 
 // spinner holds the lifecycle channels for an in-progress spinner animation.

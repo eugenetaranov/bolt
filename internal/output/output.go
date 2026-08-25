@@ -396,9 +396,22 @@ func (o *Output) PlanStart(dryRun bool) {
 	o.printf("\n%s\n", o.color(colorBold, label))
 }
 
+// PlanCheck shows a live "checking <name>" spinner while a task's plan check
+// runs (interactive only). PlanLine clears it when the resolved line is ready.
+func (o *Output) PlanCheck(name string) {
+	if o.spinnerOn() {
+		o.startSpinner(name)
+	}
+}
+
 // PlanLine renders one planned task. Tasks filtered out by the user's
-// --tags/--roles selection are omitted (counted in the summary instead).
+// --tags/--roles selection are omitted (counted in the summary instead). A
+// running PlanCheck spinner is stopped and its line cleared first.
 func (o *Output) PlanLine(t PlannedTask) {
+	if o.spin != nil {
+		o.stopSpinner()
+		fmt.Fprint(o.w, "\r\033[K") // clear the "checking …" spinner line
+	}
 	if isFilteredPlanSkip(t) {
 		return
 	}

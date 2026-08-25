@@ -2,7 +2,6 @@ package output
 
 import (
 	"bytes"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -204,44 +203,15 @@ func TestTaskResult_Detail(t *testing.T) {
 	}
 }
 
-func TestShimmerGlyph_Sweep(t *testing.T) {
-	ansi := regexp.MustCompile(`\033\[[0-9;]*m`)
-	sparkPos := func(i int) int {
-		clean := ansi.ReplaceAllString(shimmerGlyph(i), "")
-		runes := []rune(clean)
-		if len(runes) != shimmerWidth {
-			t.Fatalf("shimmerGlyph(%d) has %d cells, want %d (%q)", i, len(runes), shimmerWidth, clean)
-		}
-		for j, r := range runes {
-			if r == '✦' {
-				return j
-			}
-		}
-		t.Fatalf("shimmerGlyph(%d) has no spark: %q", i, clean)
-		return -1
-	}
-	// One full period (2*(width-1)=8) should ping-pong 0..4..1.
-	want := []int{0, 1, 2, 3, 4, 3, 2, 1}
-	for i, w := range want {
-		if got := sparkPos(i); got != w {
-			t.Errorf("spark position at frame %d = %d, want %d", i, got, w)
-		}
-	}
-	// It loops.
-	if sparkPos(8) != 0 {
-		t.Errorf("spark should return to 0 after one period")
-	}
-}
-
 func TestGlyph_StyleDispatch(t *testing.T) {
 	var buf bytes.Buffer
 	o := New(&buf)
-	o.SetSpinnerStyle("shimmer")
-	if !strings.Contains(o.glyph(0), "✦") {
-		t.Errorf("shimmer style should render the spark glyph, got %q", o.glyph(0))
+	o.SetSpinnerStyle("flower")
+	if !strings.Contains(o.glyph(0)+o.glyph(5), "❋") {
+		t.Errorf("flower style should render a bloom glyph, got %q", o.glyph(5))
 	}
 	o.SetSpinnerStyle("")
-	if strings.Contains(o.glyph(0), "✦") {
-		t.Errorf("default style should render braille, not the spark: %q", o.glyph(0))
+	if strings.Contains(o.glyph(0), "❋") {
+		t.Errorf("default style should render braille: %q", o.glyph(0))
 	}
 }

@@ -274,6 +274,11 @@ type PlayContext struct {
 	// disables streaming (the plan is rendered in one batch instead).
 	OnPlanLine func(output.PlannedTask)
 
+	// OnPlanCheck, when set, is called with a task's display name just before
+	// its plan check runs, so the UI can show a live "checking …" spinner that
+	// OnPlanLine then resolves into the task's line.
+	OnPlanCheck func(name string)
+
 	// PlaybookDir is the directory of the playbook file, used for
 	// resolving relative include paths.
 	PlaybookDir string
@@ -881,8 +886,10 @@ func (e *Executor) runPlayOnHost(ctx context.Context, play *playbook.Play, stats
 	if streamer, ok := emitter.(*output.Output); ok {
 		streamer.PlanStart(e.DryRun)
 		pctx.OnPlanLine = streamer.PlanLine
+		pctx.OnPlanCheck = streamer.PlanCheck
 		planned = e.computeHostPlan(ctx, pctx, allTasks, allHandlers)
 		pctx.OnPlanLine = nil
+		pctx.OnPlanCheck = nil
 		streamer.PlanEnd(planned, e.DryRun)
 	} else {
 		planned = e.computeHostPlan(ctx, pctx, allTasks, allHandlers)
@@ -1663,6 +1670,12 @@ func (e *Executor) planTasks(ctx context.Context, pctx *PlayContext, tasks []*pl
 	for _, task := range tasks {
 		eTags := effectiveTags(task, playTags, inheritedBlockTags)
 
+		// Show a "checking <task>" spinner while this task's plan is computed;
+		// record()/OnPlanLine resolves it into the task's line.
+		if pctx.OnPlanCheck != nil {
+			pctx.OnPlanCheck(task.String())
+		}
+
 		// Role filtering in plan phase (mirrors applyHostPlan)
 		if !shouldRunRole(task.RoleName, e.Roles) {
 			record(output.PlannedTask{
@@ -1949,10 +1962,10 @@ func (e *Executor) planBlock(ctx context.Context, pctx *PlayContext, task *playb
 			plan = append(plan, e.planBlock(ctx, pctx, child, indent+1, registeredNames, childBlockTags)...)
 			return
 		}
-		saved := pctx.OnPlanLine
-		pctx.OnPlanLine = nil
+		savedLine, savedCheck := pctx.OnPlanLine, pctx.OnPlanCheck
+		pctx.OnPlanLine, pctx.OnPlanCheck = nil, nil
 		pts := e.planTasks(ctx, pctx, []*playbook.Task{child}, pctx.Output, childBlockTags)
-		pctx.OnPlanLine = saved
+		pctx.OnPlanLine, pctx.OnPlanCheck = savedLine, savedCheck
 		for i := range pts {
 			pts[i].Indent = indent + 1
 			record(pts[i])
