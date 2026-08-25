@@ -51,6 +51,24 @@ func (o *Output) startSpinnerRender(render func(frame string) string) {
 	}()
 }
 
+// StartProgress animates a spinner with a dynamic label (labelFn is called
+// each frame, e.g. to show a live "4/10 hosts" count) and returns a stop
+// function that halts the animation and clears the line. It is a no-op (stop
+// does nothing) outside interactive mode, so CI/piped output stays quiet.
+// Only one spinner may run at a time.
+func (o *Output) StartProgress(labelFn func() string) (stop func()) {
+	if !o.spinnerOn() {
+		return func() {}
+	}
+	o.startSpinnerRender(func(frame string) string {
+		return fmt.Sprintf("\r%s %s\033[K", frame, labelFn())
+	})
+	return func() {
+		o.stopSpinner()
+		fmt.Fprint(o.w, "\r\033[K") // clear the transient progress line
+	}
+}
+
 // stopSpinner halts the animation goroutine and joins it, guaranteeing no
 // further writes to o.w happen from the spinner before the caller writes next.
 func (o *Output) stopSpinner() {

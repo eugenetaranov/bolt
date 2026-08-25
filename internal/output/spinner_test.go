@@ -130,3 +130,42 @@ func TestHostFacts_Interactive(t *testing.T) {
 		t.Fatalf("expected a spinner frame in output: %q", got)
 	}
 }
+
+// TestStartProgress_NonInteractive verifies the progress spinner is silent
+// (no control codes) when the writer is not a terminal.
+func TestStartProgress_NonInteractive(t *testing.T) {
+	var buf bytes.Buffer
+	o := New(&buf) // not a terminal
+	stop := o.StartProgress(func() string { return "planning 1/2 hosts" })
+	stop()
+	if buf.Len() != 0 {
+		t.Fatalf("non-interactive progress must produce no output, got %q", buf.String())
+	}
+}
+
+// TestStartProgress_Interactive verifies the progress spinner draws the dynamic
+// label and clears the line when stopped.
+func TestStartProgress_Interactive(t *testing.T) {
+	var buf bytes.Buffer
+	o := New(&buf)
+	o.interactive = true
+
+	n := 0
+	stop := o.StartProgress(func() string {
+		n++
+		return "gathering facts + planning 1/2 hosts"
+	})
+	time.Sleep(120 * time.Millisecond) // let it draw a frame or two
+	stop()
+
+	got := buf.String()
+	if !strings.Contains(got, "gathering facts + planning 1/2 hosts") {
+		t.Errorf("expected the dynamic label in output: %q", got)
+	}
+	if !strings.HasSuffix(got, "\r\033[K") {
+		t.Errorf("progress should clear the line on stop: %q", got)
+	}
+	if n == 0 {
+		t.Error("labelFn should have been called at least once")
+	}
+}

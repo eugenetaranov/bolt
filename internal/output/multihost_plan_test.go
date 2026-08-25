@@ -155,7 +155,7 @@ func TestFormatHostPrefix(t *testing.T) {
 		expected string
 	}{
 		{"web1", 4, "web1"},
-		{"web1", 8, "web1    "},                 // padded
+		{"web1", 8, "web1    "}, // padded
 		{"i-0817eea131fa23c39", 19, "i-0817eea131fa23c39"},
 		{strings.Repeat("a", 35), 30, strings.Repeat("a", 29) + "…"}, // truncated
 	}
@@ -183,4 +183,25 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+// TestDisplayMultiHostPlan_OmitsTagSkips verifies tag-filtered tasks are omitted
+// from the multi-host plan body and reported as "N filtered" in the footer,
+// while role-filtered tasks remain visible.
+func TestDisplayMultiHostPlan_OmitsTagSkips(t *testing.T) {
+	hosts := []string{"web1", "web2"}
+	plans := []PlannedTask{
+		{Host: "web1", Name: "install nginx", Module: "apt", Status: "will_change"},
+		{Host: "web1", Name: "build step", Module: "command", Status: "will_skip", Reason: "skipped (tag)"},
+		{Host: "web2", Name: "install nginx", Module: "apt", Status: "will_change"},
+		{Host: "web2", Name: "build step", Module: "command", Status: "will_skip", Reason: "skipped (tag)"},
+		{Host: "web1", Name: "role only", Module: "apt", Status: "will_skip", Reason: "skipped (role)"},
+	}
+
+	out := renderMulti(plans, hosts, false)
+
+	assert.Contains(t, out, "install nginx", "active task should be shown")
+	assert.NotContains(t, out, "build step", "tag-filtered task should be omitted")
+	assert.Contains(t, out, "role only", "role-filtered task should still be shown")
+	assert.Contains(t, out, "2 filtered", "footer should report the filtered count across hosts")
 }

@@ -615,9 +615,13 @@ func (o *Output) DisplayMultiHostPlan(tasks []PlannedTask, hosts []string, dryRu
 
 	// Counters span all hosts (including no-op hosts whose tasks didn't
 	// render). The footer summarizes the play, not just the visible body.
-	var willRun, willSkip, conditional, willChange, noChange, alwaysRuns int
+	var willRun, willSkip, conditional, willChange, noChange, alwaysRuns, filtered int
 	for _, t := range tasks {
 		if t.IsSection {
+			continue
+		}
+		if isFilteredPlanSkip(t) {
+			filtered++
 			continue
 		}
 		switch t.Status {
@@ -636,13 +640,17 @@ func (o *Output) DisplayMultiHostPlan(tasks []PlannedTask, hosts []string, dryRu
 		}
 	}
 
-	// Render per-host bodies (skip hosts with no changes).
+	// Render per-host bodies (skip hosts with no changes). Tasks filtered out
+	// by --tags/--skip-tags are omitted (counted in the footer).
 	for _, host := range hosts {
 		if !changing[host] {
 			continue
 		}
 		prefix := formatHostPrefix(host, colWidth) + ": "
 		for _, t := range byHost[host] {
+			if isFilteredPlanSkip(t) {
+				continue
+			}
 			o.renderMultiHostPlanLine(t, prefix, colWidth)
 		}
 	}
@@ -664,6 +672,9 @@ func (o *Output) DisplayMultiHostPlan(tasks []PlannedTask, hosts []string, dryRu
 	}
 	if willSkip > 0 {
 		summaryParts = append(summaryParts, fmt.Sprintf("%d to skip", willSkip))
+	}
+	if filtered > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d filtered", filtered))
 	}
 	if len(summaryParts) == 0 {
 		summaryParts = append(summaryParts, "nothing to do")

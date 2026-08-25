@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tackhq/tack/internal/connector"
@@ -208,12 +209,25 @@ func (e *Executor) discoverAndPlanParallel(ctx context.Context, play *playbook.P
 	var (
 		mu      sync.Mutex
 		results = make(map[string]*hostPrep, len(hosts))
+		done    int64
 	)
+
+	// Live progress during the otherwise-silent parallel gather+plan phase
+	// (especially valuable for high-latency connectors like SSM). No-op in
+	// non-interactive mode.
+	stopProgress := func() {}
+	if o, ok := e.Output.(*output.Output); ok {
+		total := len(hosts)
+		stopProgress = o.StartProgress(func() string {
+			return fmt.Sprintf("gathering facts + planning %d/%d hosts", atomic.LoadInt64(&done), total)
+		})
+	}
 
 	pool := NewWorkerPool(limit)
 	for _, host := range hosts {
 		host := host
 		pool.Submit(ctx, func(ctx context.Context) *HostResult {
+			defer atomic.AddInt64(&done, 1)
 			prep := &hostPrep{host: host, output: &bytes.Buffer{}}
 
 			hostOutput := output.New(prep.output)
@@ -296,6 +310,7 @@ func (e *Executor) discoverAndPlanParallel(ctx context.Context, play *playbook.P
 		})
 	}
 	pool.Wait()
+	stopProgress()
 
 	if e.Output != nil {
 		var failed int
