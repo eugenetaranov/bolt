@@ -168,6 +168,45 @@ func (o *Output) factsBanner() string {
 	return fmt.Sprintf("%s %s - gathering facts", o.color(colorBold, "HOST"), o.hostLabel)
 }
 
+// hostBanner returns the plain "HOST <label>" line (no phase suffix).
+func (o *Output) hostBanner() string {
+	return fmt.Sprintf("%s %s", o.color(colorBold, "HOST"), o.hostLabel)
+}
+
+// HostConnectStart shows a live "connecting" spinner on the open HostStart
+// banner while the connection is established — useful when a host is slow to
+// answer. No-op outside interactive mode.
+func (o *Output) HostConnectStart(_ string) {
+	if o.spinnerOn() {
+		o.startLineSpinner(o.hostBanner() + " - connecting")
+	}
+}
+
+// HostConnectDone resolves the connecting phase. On success it clears the
+// spinner and restores the plain HOST banner so the fact-gathering phase can
+// continue on the same line; on failure it marks the banner with ✗ and prints
+// the error on a follow-up line.
+func (o *Output) HostConnectDone(_ string, ok bool, errMsg string) {
+	if o.spin != nil {
+		o.stopSpinner()
+	}
+	if ok {
+		if o.spinnerOn() {
+			fmt.Fprintf(o.w, "\r%s\033[K", o.hostBanner())
+		}
+		return
+	}
+	mark := o.color(colorRed, "✗")
+	if o.spinnerOn() {
+		fmt.Fprintf(o.w, "\r%s - connecting %s\033[K\n", o.hostBanner(), mark)
+	} else {
+		o.printf(" - connecting %s\n", mark)
+	}
+	if errMsg != "" {
+		o.Error("%s", errMsg)
+	}
+}
+
 // HostFactsStart signals that fact-gathering has begun on the open HostStart
 // banner. In interactive mode it completes the line to
 // "HOST <label> - gathering facts" and animates a spinner until

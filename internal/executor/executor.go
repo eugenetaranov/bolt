@@ -810,10 +810,23 @@ func (e *Executor) preparePlayContext(ctx context.Context, play *playbook.Play, 
 		}
 		pctx.Connector = conn
 
+		// Show a "connecting" spinner while the connection is established
+		// (text output only) — helps when a host is slow to answer.
+		connOut, _ := emitter.(*output.Output)
+		if connOut != nil {
+			connOut.HostConnectStart(host)
+		}
 		if err := conn.Connect(ctx); err != nil {
-			emitter.HostFactsResult(host, false, err.Error())
+			if connOut != nil {
+				connOut.HostConnectDone(host, false, err.Error())
+			} else {
+				emitter.HostFactsResult(host, false, err.Error())
+			}
 			_ = conn.Close()
 			return nil, fmt.Errorf("failed to connect to %s: %w", host, err)
+		}
+		if connOut != nil {
+			connOut.HostConnectDone(host, true, "")
 		}
 
 		if e.shouldGatherFacts(play) {

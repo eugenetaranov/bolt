@@ -215,3 +215,64 @@ func TestGlyph_StyleDispatch(t *testing.T) {
 		t.Errorf("default style should render braille: %q", o.glyph(0))
 	}
 }
+
+// TestHostConnect_NonInteractive verifies the connecting phase adds nothing in
+// plain mode (no spinner), so the banner flows straight into facts.
+func TestHostConnect_NonInteractive(t *testing.T) {
+	var buf bytes.Buffer
+	o := New(&buf)
+	o.SetColor(false)
+
+	o.HostStart("h", "ssh")
+	o.HostConnectStart("h")          // no-op
+	o.HostConnectDone("h", true, "") // no-op on success
+	o.HostFactsResult("h", true, "")
+
+	if want, got := "\nHOST h [ssh] - gathering facts ✓\n", buf.String(); got != want {
+		t.Errorf("plain connect+facts flow = %q, want %q", got, want)
+	}
+}
+
+// TestHostConnect_Failure verifies a connect failure marks the banner and prints
+// the error.
+func TestHostConnect_Failure(t *testing.T) {
+	var buf bytes.Buffer
+	o := New(&buf)
+	o.SetColor(false)
+
+	o.HostStart("h", "ssh")
+	o.HostConnectStart("h")
+	o.HostConnectDone("h", false, "connection refused")
+
+	got := buf.String()
+	if !strings.Contains(got, "- connecting ✗") {
+		t.Errorf("expected connecting ✗ marker: %q", got)
+	}
+	if !strings.Contains(got, "connection refused") {
+		t.Errorf("expected the error message: %q", got)
+	}
+}
+
+// TestHostConnect_InteractiveSuccess verifies the spinner animates and then the
+// plain banner is restored for the facts phase.
+func TestHostConnect_InteractiveSuccess(t *testing.T) {
+	var buf bytes.Buffer
+	o := New(&buf)
+	o.interactive = true
+
+	o.HostStart("h", "ssh")
+	o.HostConnectStart("h")
+	time.Sleep(120 * time.Millisecond) // let the connecting spinner draw
+	o.HostConnectDone("h", true, "")
+
+	got := buf.String()
+	if o.spin != nil {
+		t.Error("connecting spinner should be stopped after HostConnectDone")
+	}
+	if !strings.Contains(got, "connecting") {
+		t.Errorf("expected the connecting label while spinning: %q", got)
+	}
+	if !strings.HasSuffix(got, "\033[K") {
+		t.Errorf("success should redraw the plain banner and clear to EOL: %q", got)
+	}
+}
