@@ -238,7 +238,21 @@ func (c *Connector) Execute(ctx context.Context, cmd string) (*connector.Result,
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 	if stdin != nil {
-		session.Stdin = bytes.NewReader(stdin)
+		// Feed the sudo password through an explicit pipe rather than
+		// session.Stdin. sudo authenticates and the wrapped command can exit
+		// before all of stdin is consumed; the remote then closes the channel
+		// and a session.Stdin copy would surface that as an io.EOF error from
+		// Run, masking the real exit status. Writing here and swallowing the
+		// (expected, benign) write error keeps Run's error strictly about the
+		// command itself.
+		stdinPipe, err := session.StdinPipe()
+		if err != nil {
+			return nil, fmt.Errorf("failed to open stdin pipe: %w", err)
+		}
+		go func() {
+			_, _ = stdinPipe.Write(stdin)
+			_ = stdinPipe.Close()
+		}()
 	}
 
 	// Run with context cancellation support
