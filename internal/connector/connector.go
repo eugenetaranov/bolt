@@ -57,17 +57,24 @@ func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
-// BuildSudoCommand wraps a command with sudo if enabled, skipping when already root.
-func BuildSudoCommand(cmd string, sudoEnabled bool, password string, isRoot bool) string {
+// SudoWrap wraps cmd with sudo when enabled (skipping when already root).
+//
+// When a password is set it uses `sudo -S -p ''` and returns the password
+// (with a trailing newline) as stdin bytes for the caller to feed to the
+// process — keeping the password out of the process argv (/proc/<pid>/cmdline)
+// and off disk. `-p ''` suppresses the "[sudo] password for …" prompt on
+// stderr. The NOPASSWD path (no password) and the root / no-sudo passthrough
+// return nil stdin.
+func SudoWrap(cmd string, sudoEnabled bool, password string, isRoot bool) (wrapped string, stdin []byte) {
 	if !sudoEnabled || isRoot {
-		return cmd
+		return cmd, nil
 	}
 
 	escaped := strings.ReplaceAll(cmd, "'", "'\"'\"'")
 	if password != "" {
-		return fmt.Sprintf("printf '%%s\\n' '%s' | sudo -S sh -c '%s'", password, escaped)
+		return fmt.Sprintf("sudo -S -p '' sh -c '%s'", escaped), []byte(password + "\n")
 	}
-	return fmt.Sprintf("sudo sh -c '%s'", escaped)
+	return fmt.Sprintf("sudo sh -c '%s'", escaped), nil
 }
 
 // Config holds common configuration for connectors.

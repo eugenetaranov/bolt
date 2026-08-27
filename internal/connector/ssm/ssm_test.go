@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -290,8 +289,10 @@ func TestExecute_WithSudo(t *testing.T) {
 	c := New("i-test123", withSSMClient(mock), WithSudo(), WithSudoPassword("secret"))
 
 	_, _ = c.Execute(context.Background(), "apt update")
-	assert.Contains(t, capturedCmd, "sudo -S sh -c")
-	assert.Contains(t, capturedCmd, "secret")
+	// Password is fed via a quoted heredoc (SSM has no stdin channel) rather
+	// than on the sudo command line — it must not sit before the pipe/argv.
+	assert.Contains(t, capturedCmd, "sudo -S -p '' sh -c 'apt update'")
+	assert.Contains(t, capturedCmd, "<<'TACK_SUDO_PW'\nsecret\nTACK_SUDO_PW")
 }
 
 func TestUploadBase64(t *testing.T) {
@@ -604,7 +605,7 @@ func TestBuildCommand(t *testing.T) {
 	}{
 		{"no sudo", false, "", "ls", "ls"},
 		{"sudo no pass", true, "", "ls", "sudo sh -c 'ls'"},
-		{"sudo with pass", true, "secret", "ls", fmt.Sprintf("printf '%%s\\n' 'secret' | sudo -S sh -c 'ls'")},
+		{"sudo with pass", true, "secret", "ls", "sudo -S -p '' sh -c 'ls' <<'TACK_SUDO_PW'\nsecret\nTACK_SUDO_PW"},
 	}
 
 	for _, tt := range tests {

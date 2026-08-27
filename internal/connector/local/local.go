@@ -81,8 +81,9 @@ func (c *Connector) Connect(ctx context.Context) error {
 
 // Execute runs a command locally and returns the result.
 func (c *Connector) Execute(ctx context.Context, cmd string) (*connector.Result, error) {
-	// Build the command
-	fullCmd := c.buildCommand(cmd)
+	// Build the command. Any stdin bytes carry the sudo password, fed on the
+	// process's stdin so it never appears in the argv (/proc/<pid>/cmdline).
+	fullCmd, stdin := c.buildCommand(cmd)
 
 	// Create the exec.Cmd
 	args := make([]string, len(c.shellArgs)+1)
@@ -93,6 +94,9 @@ func (c *Connector) Execute(ctx context.Context, cmd string) (*connector.Result,
 	var stdout, stderr bytes.Buffer
 	execCmd.Stdout = &stdout
 	execCmd.Stderr = &stderr
+	if stdin != nil {
+		execCmd.Stdin = bytes.NewReader(stdin)
+	}
 
 	// Run the command
 	err := execCmd.Run()
@@ -115,13 +119,14 @@ func (c *Connector) Execute(ctx context.Context, cmd string) (*connector.Result,
 	return result, nil
 }
 
-// buildCommand wraps the command with sudo if configured.
-func (c *Connector) buildCommand(cmd string) string {
+// buildCommand wraps the command with sudo if configured, returning any stdin
+// bytes (the sudo password) that must be fed to the process.
+func (c *Connector) buildCommand(cmd string) (string, []byte) {
 	isRoot := false
 	if u, err := user.Current(); err == nil && u.Uid == "0" {
 		isRoot = true
 	}
-	return connector.BuildSudoCommand(cmd, c.sudo, c.sudoPassword, isRoot)
+	return connector.SudoWrap(cmd, c.sudo, c.sudoPassword, isRoot)
 }
 
 // SetSudo enables or disables sudo for subsequent commands.

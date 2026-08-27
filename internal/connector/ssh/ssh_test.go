@@ -60,12 +60,13 @@ func TestApplyDefaultsPreservesExplicit(t *testing.T) {
 
 func TestBuildCommand(t *testing.T) {
 	tests := []struct {
-		name         string
-		sudo         bool
-		sudoPassword string
-		user         string
-		cmd          string
-		expected     string
+		name          string
+		sudo          bool
+		sudoPassword  string
+		user          string
+		cmd           string
+		expected      string
+		expectedStdin string
 	}{
 		{
 			name:     "no sudo",
@@ -79,11 +80,12 @@ func TestBuildCommand(t *testing.T) {
 			expected: "sudo sh -c 'whoami'",
 		},
 		{
-			name:         "sudo with password",
-			sudo:         true,
-			sudoPassword: "secret",
-			cmd:          "whoami",
-			expected:     "printf '%s\\n' 'secret' | sudo -S sh -c 'whoami'",
+			name:          "sudo with password",
+			sudo:          true,
+			sudoPassword:  "secret",
+			cmd:           "whoami",
+			expected:      "sudo -S -p '' sh -c 'whoami'",
+			expectedStdin: "secret\n",
 		},
 		{
 			name:     "sudo skipped for root user",
@@ -97,7 +99,14 @@ func TestBuildCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &Connector{sudo: tt.sudo, sudoPassword: tt.sudoPassword, user: tt.user}
-			assert.Equal(t, tt.expected, c.buildCommand(tt.cmd))
+			got, stdin := c.buildCommand(tt.cmd)
+			assert.Equal(t, tt.expected, got)
+			assert.Equal(t, tt.expectedStdin, string(stdin))
+			// The password must never appear in the command that becomes argv.
+			if tt.sudoPassword != "" {
+				assert.NotContains(t, got, tt.sudoPassword,
+					"sudo password must not leak into the process argv")
+			}
 		})
 	}
 }

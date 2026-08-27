@@ -468,8 +468,20 @@ func (c *Connector) String() string {
 }
 
 // buildCommand wraps the command with sudo if configured.
+//
+// AWS-RunShellScript has no stdin channel, so when sudo needs a password we
+// feed it via a quoted heredoc appended to the command. This keeps the password
+// out of the instance's process argv (/proc/<pid>/cmdline) — it lives only in
+// the SSM-agent's temporary script on disk. NOTE: SSM Run Command history and
+// CloudTrail still record the full command text, so a passwordless-sudo
+// (NOPASSWD) role remains the recommended setup for SSM targets.
 func (c *Connector) buildCommand(cmd string) string {
-	return connector.BuildSudoCommand(cmd, c.sudo, c.sudoPassword, false)
+	wrapped, stdin := connector.SudoWrap(cmd, c.sudo, c.sudoPassword, false)
+	if stdin == nil {
+		return wrapped
+	}
+	// stdin already carries the trailing newline; the heredoc adds its own.
+	return fmt.Sprintf("%s <<'TACK_SUDO_PW'\n%sTACK_SUDO_PW", wrapped, stdin)
 }
 
 // cleanupS3 removes a temporary S3 object (best-effort).

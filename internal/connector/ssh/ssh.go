@@ -229,12 +229,17 @@ func (c *Connector) Execute(ctx context.Context, cmd string) (*connector.Result,
 	}
 	defer session.Close()
 
-	// Build the command with sudo if configured
-	fullCmd := c.buildCommand(cmd)
+	// Build the command with sudo if configured. Any stdin bytes carry the
+	// sudo password, fed over the encrypted channel so it never appears in the
+	// remote process argv.
+	fullCmd, stdin := c.buildCommand(cmd)
 
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout
 	session.Stderr = &stderr
+	if stdin != nil {
+		session.Stdin = bytes.NewReader(stdin)
+	}
 
 	// Run with context cancellation support
 	done := make(chan error, 1)
@@ -582,9 +587,10 @@ func loadKey(path string) (ssh.Signer, error) {
 	return signer, nil
 }
 
-// buildCommand wraps the command with sudo if configured.
-func (c *Connector) buildCommand(cmd string) string {
-	return connector.BuildSudoCommand(cmd, c.sudo, c.sudoPassword, c.user == "root")
+// buildCommand wraps the command with sudo if configured, returning any stdin
+// bytes (the sudo password) that must be fed to the process.
+func (c *Connector) buildCommand(cmd string) (string, []byte) {
+	return connector.SudoWrap(cmd, c.sudo, c.sudoPassword, c.user == "root")
 }
 
 // SetSudo enables or disables sudo for subsequent commands.
