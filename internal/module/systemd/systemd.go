@@ -30,7 +30,7 @@ func (m *Module) Description() string {
 // Parameters returns the parameter documentation for the systemd module.
 func (m *Module) Parameters() []module.ParamDoc {
 	return []module.ParamDoc{
-		{Name: "name", Type: "string", Required: true, Description: "Service unit name"},
+		{Name: "name", Type: "string", Description: "Service unit name (required unless the only operation is daemon_reload)"},
 		{Name: "state", Type: "string", Description: "Desired state: started, stopped, restarted, reloaded"},
 		{Name: "enabled", Type: "bool", Description: "Whether the service should start on boot"},
 		{Name: "masked", Type: "bool", Description: "Whether the service should be masked"},
@@ -56,18 +56,13 @@ var (
 // Run executes the systemd module.
 //
 // Parameters:
-//   - name (string, required): Service unit name (e.g., "docker", "nginx.service")
+//   - name (string): Service unit name (e.g., "docker", "nginx.service"). Required
+//     unless the only requested operation is daemon_reload.
 //   - state (string): Desired runtime state - started, stopped, restarted, reloaded (default: "")
 //   - enabled (bool): Whether the service should be enabled at boot (default: nil/unset)
 //   - daemon_reload (bool): Run daemon-reload before other operations (default: false)
 //   - masked (bool): Whether the service should be masked (default: nil/unset)
 func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[string]any) (*module.Result, error) {
-	name, err := module.RequireString(params, "name")
-	if err != nil {
-		return nil, err
-	}
-	name = normalizeUnit(name)
-
 	state := module.GetString(params, "state", "")
 	daemonReload := module.GetBool(params, "daemon_reload", false)
 
@@ -77,6 +72,13 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 		// Valid
 	default:
 		return nil, fmt.Errorf("invalid state '%s': must be started, stopped, restarted, or reloaded", state)
+	}
+
+	// name is required only when a state-changing action is requested. A task
+	// that only asks for daemon_reload operates on no unit and needs no name.
+	name, err := resolveName(params, state)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := checkSystemd(ctx, conn); err != nil {
@@ -176,14 +178,15 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 
 // Check determines whether the systemd module would make changes.
 func (m *Module) Check(ctx context.Context, conn connector.Connector, params map[string]any) (*module.CheckResult, error) {
-	name, err := module.RequireString(params, "name")
+	state := module.GetString(params, "state", "")
+	daemonReload := module.GetBool(params, "daemon_reload", false)
+
+	// name is required only when a state-changing action is requested; a
+	// daemon_reload-only check touches no unit and needs no name.
+	name, err := resolveName(params, state)
 	if err != nil {
 		return nil, err
 	}
-	name = normalizeUnit(name)
-
-	state := module.GetString(params, "state", "")
-	daemonReload := module.GetBool(params, "daemon_reload", false)
 
 	if err := checkSystemd(ctx, conn); err != nil {
 		return nil, err
@@ -260,9 +263,35 @@ func (m *Module) Check(ctx context.Context, conn connector.Connector, params map
 		return module.WouldChange(strings.Join(parts, ", ")), nil
 	}
 	if len(parts) > 0 {
+		if name == "" {
+			return module.NoChange("daemon-reload only"), nil
+		}
 		return module.NoChange("service already in desired state (daemon-reload only)"), nil
 	}
 	return module.NoChange("service already in desired state"), nil
+}
+
+// resolveName extracts the unit name, enforcing that it is present only when a
+// state-changing action (state, enabled, or masked) is requested. When the task
+// only performs a daemon_reload, the name may be omitted and an empty string is
+// returned so no unit is touched. A returned name is normalized to a unit.
+func resolveName(params map[string]any, state string) (string, error) {
+	_, hasEnabled := params["enabled"]
+	_, hasMasked := params["masked"]
+
+	if state != "" || hasEnabled || hasMasked {
+		name, err := module.RequireString(params, "name")
+		if err != nil {
+			return "", err
+		}
+		return normalizeUnit(name), nil
+	}
+
+	name := module.GetString(params, "name", "")
+	if name != "" {
+		name = normalizeUnit(name)
+	}
+	return name, nil
 }
 
 // normalizeUnit ensures the unit name has a .service suffix.
