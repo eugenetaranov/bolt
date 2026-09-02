@@ -898,7 +898,13 @@ func (e *Executor) preparePlayContext(ctx context.Context, play *playbook.Play, 
 		PlaybookDir:      playbookDir,
 	}
 
-	// Merge variables with correct precedence: role defaults < role vars < play vars
+	// Variable precedence (lowest to highest; higher wins):
+	//   role defaults < role vars < inventory group vars < inventory host vars
+	//   < play vars < vars_files < vault
+	// Inventory vars are injected only where a play var isn't already set, so
+	// play vars win over inventory (matching Ansible). vars_files and vault
+	// override play/inventory vars. facts are namespaced under the "facts" key
+	// and never collide with these.
 	pctx.Vars = playbook.MergeRoleVars(roles, play.Vars)
 
 	// Merge vars_files (higher priority than play vars, lower than inventory vars)
@@ -931,16 +937,17 @@ func (e *Executor) preparePlayContext(ctx context.Context, play *playbook.Play, 
 		}
 	}
 
-	// Merge vault variables (between play vars and facts in precedence)
+	// Merge vault variables. Like vars_files, decrypted vault vars override
+	// play vars and inventory vars (a play default must not silently shadow a
+	// same-named secret). Facts are namespaced under "facts" so they don't
+	// collide here.
 	if play.VaultFile != "" {
 		vaultVars, err := e.loadVaultVars(play, playbookDir)
 		if err != nil {
 			return nil, fmt.Errorf("vault: %w", err)
 		}
 		for k, v := range vaultVars {
-			if _, exists := pctx.Vars[k]; !exists {
-				pctx.Vars[k] = v
-			}
+			pctx.Vars[k] = v
 		}
 	}
 

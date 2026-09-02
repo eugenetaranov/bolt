@@ -53,6 +53,39 @@ func TestVaultIntegration_PasswordFromCallback(t *testing.T) {
 	assert.True(t, result.Success)
 }
 
+// TestVaultIntegration_VaultOverridesPlayVar verifies that a decrypted vault
+// variable wins over a same-named play var (a play default must not shadow a
+// secret).
+func TestVaultIntegration_VaultOverridesPlayVar(t *testing.T) {
+	dir := t.TempDir()
+	password := "pw"
+	vaultPath := createTestVault(t, dir, "secrets.vault", "secret: vault-value\n", password)
+
+	e := New()
+	e.AutoApprove = true
+	e.ResolveVaultPassword = func() ([]byte, error) { return []byte(password), nil }
+
+	falseVal := false
+	pb := &playbook.Playbook{
+		Path: dir,
+		Plays: []*playbook.Play{{
+			Name:        "vault precedence",
+			Hosts:       []string{"localhost"},
+			Connection:  "local",
+			GatherFacts: &falseVal,
+			VaultFile:   vaultPath,
+			Vars:        map[string]any{"secret": "play-value"},
+			Tasks: []*playbook.Task{
+				{Assert: &playbook.AssertSpec{That: []string{"secret == 'vault-value'"}}},
+			},
+		}},
+	}
+
+	result, err := e.Run(context.Background(), pb)
+	require.NoError(t, err)
+	assert.True(t, result.Success, "vault var should override the play var")
+}
+
 // TestVaultIntegration_PasswordFileFirstLineOnly tests that when a password file
 // contains multiple lines, only the first line is used as the password.
 func TestVaultIntegration_PasswordFileFirstLineOnly(t *testing.T) {
