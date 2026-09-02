@@ -66,6 +66,10 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 	installRecommends := module.GetBool(params, "install_recommends", true)
 	autoremove := module.GetBool(params, "autoremove", false)
 	debFile := module.GetString(params, "deb", "")
+	defaultRelease := module.GetString(params, "default_release", "")
+	allowDowngrade := module.GetBool(params, "allow_downgrade", false)
+	hold := module.GetBool(params, "hold", false)
+	instOpts := installOpts{recommends: installRecommends, defaultRelease: defaultRelease, allowDowngrade: allowDowngrade}
 
 	// Validate state
 	switch state {
@@ -145,8 +149,15 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 		return module.Unchanged("no changes needed"), nil
 	}
 
+	// Parse "name=version" pins into (package, version) specs.
+	specs := parseSpecs(names)
+	bareNames := make([]string, len(specs))
+	for i, s := range specs {
+		bareNames[i] = s.name
+	}
+
 	// Get package states
-	pkgStates, err := getPackageStates(ctx, conn, names)
+	pkgStates, err := getPackageStates(ctx, conn, bareNames)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get package states: %w", err)
 	}
@@ -154,34 +165,35 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 	// Determine actions needed
 	var toInstall, toRemove, toUpgrade, toPurge []string
 
-	for _, name := range names {
-		pkgState := pkgStates[name]
+	for _, spec := range specs {
+		pkgState := pkgStates[spec.name]
 
 		switch state {
 		case StatePresent:
-			if !pkgState.Installed {
-				toInstall = append(toInstall, name)
+			if !pkgState.Installed || spec.versionMismatch(pkgState.Version) {
+				toInstall = append(toInstall, spec.installArg())
 			}
 		case StateAbsent:
 			if pkgState.Installed {
-				toRemove = append(toRemove, name)
+				toRemove = append(toRemove, spec.name)
 			}
 		case StatePurged:
 			if pkgState.Installed || pkgState.ConfigFiles {
-				toPurge = append(toPurge, name)
+				toPurge = append(toPurge, spec.name)
 			}
 		case StateLatest:
-			if !pkgState.Installed {
-				toInstall = append(toInstall, name)
-			} else if pkgState.Upgradable {
-				toUpgrade = append(toUpgrade, name)
+			switch {
+			case !pkgState.Installed || spec.versionMismatch(pkgState.Version):
+				toInstall = append(toInstall, spec.installArg())
+			case pkgState.Upgradable:
+				toUpgrade = append(toUpgrade, spec.name)
 			}
 		}
 	}
 
 	// Install packages
 	if len(toInstall) > 0 {
-		if err := installPackages(ctx, conn, toInstall, installRecommends); err != nil {
+		if err := installPackages(ctx, conn, toInstall, instOpts); err != nil {
 			return nil, err
 		}
 		messages = append(messages, fmt.Sprintf("installed: %s", strings.Join(toInstall, ", ")))
@@ -208,11 +220,28 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 
 	// Upgrade packages
 	if len(toUpgrade) > 0 {
-		if err := installPackages(ctx, conn, toUpgrade, installRecommends); err != nil {
+		if err := installPackages(ctx, conn, toUpgrade, instOpts); err != nil {
 			return nil, err
 		}
 		messages = append(messages, fmt.Sprintf("upgraded: %s", strings.Join(toUpgrade, ", ")))
 		changed = true
+	}
+
+	// Apply dpkg holds only when the caller explicitly set `hold` (so the
+	// default leaves existing hold state untouched).
+	if _, holdSet := params["hold"]; holdSet && (state == StatePresent || state == StateLatest) {
+		heldChanged, err := applyHolds(ctx, conn, bareNames, hold)
+		if err != nil {
+			return nil, err
+		}
+		if heldChanged {
+			verb := "held"
+			if !hold {
+				verb = "unheld"
+			}
+			messages = append(messages, fmt.Sprintf("%s: %s", verb, strings.Join(bareNames, ", ")))
+			changed = true
+		}
 	}
 
 	// Handle autoremove
@@ -238,7 +267,48 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 type packageState struct {
 	Installed   bool
 	Upgradable  bool
-	ConfigFiles bool // Package removed but config files remain
+	ConfigFiles bool   // Package removed but config files remain
+	Version     string // Installed version (empty if not installed)
+}
+
+// pkgSpec is a package name with an optional pinned version ("nginx=1.24.0").
+type pkgSpec struct {
+	name    string
+	version string
+}
+
+// installArg returns the argument to pass to apt-get install.
+func (s pkgSpec) installArg() string {
+	if s.version != "" {
+		return s.name + "=" + s.version
+	}
+	return s.name
+}
+
+// versionMismatch reports whether a pinned version differs from the installed
+// one (never true when no version is pinned).
+func (s pkgSpec) versionMismatch(installed string) bool {
+	return s.version != "" && installed != "" && s.version != installed
+}
+
+// parseSpecs splits raw "name" entries into (package, version) specs.
+func parseSpecs(names []string) []pkgSpec {
+	specs := make([]pkgSpec, 0, len(names))
+	for _, n := range names {
+		if i := strings.Index(n, "="); i > 0 {
+			specs = append(specs, pkgSpec{name: n[:i], version: n[i+1:]})
+		} else {
+			specs = append(specs, pkgSpec{name: n})
+		}
+	}
+	return specs
+}
+
+// installOpts configures an apt-get install invocation.
+type installOpts struct {
+	recommends     bool
+	defaultRelease string
+	allowDowngrade bool
 }
 
 // checkApt verifies that apt is available.
@@ -303,7 +373,7 @@ func getPackageStates(ctx context.Context, conn connector.Connector, names []str
 
 	// Query dpkg for installed packages
 	// Status can be: installed, config-files, not-installed
-	cmd := fmt.Sprintf("dpkg-query -W -f='${Package}|${Status}\\n' %s 2>/dev/null || true",
+	cmd := fmt.Sprintf("dpkg-query -W -f='${Package}|${Status}|${Version}\\n' %s 2>/dev/null || true",
 		strings.Join(names, " "))
 	result, err := conn.Execute(ctx, cmd)
 	if err != nil {
@@ -316,8 +386,8 @@ func getPackageStates(ctx context.Context, conn connector.Connector, names []str
 			continue
 		}
 
-		parts := strings.SplitN(line, "|", 2)
-		if len(parts) != 2 {
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) < 2 {
 			continue
 		}
 
@@ -327,6 +397,9 @@ func getPackageStates(ctx context.Context, conn connector.Connector, names []str
 		if state, ok := states[name]; ok {
 			if strings.Contains(status, "install ok installed") {
 				state.Installed = true
+				if len(parts) == 3 {
+					state.Version = parts[2]
+				}
 			} else if strings.Contains(status, "config-files") {
 				state.ConfigFiles = true
 			}
@@ -350,25 +423,69 @@ func getPackageStates(ctx context.Context, conn connector.Connector, names []str
 	return states, nil
 }
 
-// installPackages installs the specified packages.
-func installPackages(ctx context.Context, conn connector.Connector, names []string, installRecommends bool) error {
-	recommends := "--no-install-recommends"
-	if installRecommends {
-		recommends = "--install-recommends"
+// installPackages installs the specified packages (which may carry =version
+// pins), honoring recommends / default_release / allow_downgrade options.
+func installPackages(ctx context.Context, conn connector.Connector, args []string, opts installOpts) error {
+	flags := []string{"--no-install-recommends"}
+	if opts.recommends {
+		flags = []string{"--install-recommends"}
+	}
+	if opts.defaultRelease != "" {
+		flags = append(flags, "-t", connector.ShellQuote(opts.defaultRelease))
+	}
+	if opts.allowDowngrade {
+		flags = append(flags, "--allow-downgrades")
 	}
 
-	quoted := make([]string, len(names))
-	for i, name := range names {
-		quoted[i] = connector.ShellQuote(name)
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = connector.ShellQuote(a)
 	}
 	cmd := fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y -qq %s %s",
-		recommends, strings.Join(quoted, " "))
+		strings.Join(flags, " "), strings.Join(quoted, " "))
 
 	if _, err := connector.Run(ctx, conn, cmd); err != nil {
 		return fmt.Errorf("apt-get install failed: %w", err)
 	}
 
 	return nil
+}
+
+// applyHolds marks (or unmarks) packages as held via apt-mark, idempotently.
+// It returns whether any hold state changed.
+func applyHolds(ctx context.Context, conn connector.Connector, names []string, hold bool) (bool, error) {
+	// Current holds.
+	held := map[string]bool{}
+	if res, err := conn.Execute(ctx, "apt-mark showhold 2>/dev/null || true"); err == nil {
+		for _, line := range strings.Fields(res.Stdout) {
+			held[strings.TrimSpace(line)] = true
+		}
+	}
+
+	var toChange []string
+	for _, n := range names {
+		if hold && !held[n] {
+			toChange = append(toChange, n)
+		} else if !hold && held[n] {
+			toChange = append(toChange, n)
+		}
+	}
+	if len(toChange) == 0 {
+		return false, nil
+	}
+
+	action := "hold"
+	if !hold {
+		action = "unhold"
+	}
+	quoted := make([]string, len(toChange))
+	for i, n := range toChange {
+		quoted[i] = connector.ShellQuote(n)
+	}
+	if _, err := connector.Run(ctx, conn, fmt.Sprintf("apt-mark %s %s", action, strings.Join(quoted, " "))); err != nil {
+		return false, fmt.Errorf("apt-mark %s failed: %w", action, err)
+	}
+	return true, nil
 }
 
 // removePackages removes the specified packages.
@@ -448,33 +565,40 @@ func (m *Module) Check(ctx context.Context, conn connector.Connector, params map
 		return module.NoChange("no packages specified"), nil
 	}
 
-	pkgStates, err := getPackageStates(ctx, conn, names)
+	specs := parseSpecs(names)
+	bareNames := make([]string, len(specs))
+	for i, s := range specs {
+		bareNames[i] = s.name
+	}
+
+	pkgStates, err := getPackageStates(ctx, conn, bareNames)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get package states: %w", err)
 	}
 
 	var toInstall, toRemove, toUpgrade, toPurge []string
 
-	for _, name := range names {
-		pkgState := pkgStates[name]
+	for _, spec := range specs {
+		pkgState := pkgStates[spec.name]
 		switch state {
 		case StatePresent:
-			if !pkgState.Installed {
-				toInstall = append(toInstall, name)
+			if !pkgState.Installed || spec.versionMismatch(pkgState.Version) {
+				toInstall = append(toInstall, spec.installArg())
 			}
 		case StateAbsent:
 			if pkgState.Installed {
-				toRemove = append(toRemove, name)
+				toRemove = append(toRemove, spec.name)
 			}
 		case StatePurged:
 			if pkgState.Installed || pkgState.ConfigFiles {
-				toPurge = append(toPurge, name)
+				toPurge = append(toPurge, spec.name)
 			}
 		case StateLatest:
-			if !pkgState.Installed {
-				toInstall = append(toInstall, name)
-			} else if pkgState.Upgradable {
-				toUpgrade = append(toUpgrade, name)
+			switch {
+			case !pkgState.Installed || spec.versionMismatch(pkgState.Version):
+				toInstall = append(toInstall, spec.installArg())
+			case pkgState.Upgradable:
+				toUpgrade = append(toUpgrade, spec.name)
 			}
 		}
 	}
@@ -525,5 +649,8 @@ func (m *Module) Parameters() []module.ParamDoc {
 		{Name: "install_recommends", Type: "bool", Default: "true", Description: "Install recommended packages"},
 		{Name: "autoremove", Type: "bool", Default: "false", Description: "Remove unused dependency packages"},
 		{Name: "deb", Type: "string", Description: "Path or URL to .deb file to install"},
+		{Name: "default_release", Type: "string", Description: "Install from a specific release (apt-get -t)"},
+		{Name: "allow_downgrade", Type: "bool", Default: "false", Description: "Permit installing an older version than installed"},
+		{Name: "hold", Type: "bool", Description: "Mark packages held (or unheld) via apt-mark"},
 	}
 }
