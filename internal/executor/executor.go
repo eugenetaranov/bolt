@@ -260,6 +260,14 @@ type PlayContext struct {
 	// NotifiedHandlers tracks which handlers should run.
 	NotifiedHandlers map[string]bool
 
+	// ExpandedHandlers is the play's full (expanded) handler list, set during
+	// apply so a `meta: flush_handlers` task can run pending handlers mid-play.
+	ExpandedHandlers []*playbook.Task
+
+	// Stats points at the running play stats during apply, so mid-play handler
+	// flushes (meta: flush_handlers) can record their results.
+	Stats *Stats
+
 	// Connector is the connection to the target.
 	Connector connector.Connector
 
@@ -950,6 +958,9 @@ func (e *Executor) applyHostPlan(ctx context.Context, pctx *PlayContext, stats *
 	emitter := pctx.Output
 	play := pctx.Play
 	playTags := play.Tags
+	// Expose handlers + stats so `meta: flush_handlers` can run mid-play.
+	pctx.ExpandedHandlers = allHandlers
+	pctx.Stats = stats
 	for _, task := range allTasks {
 		// Role filtering: when --roles is active, only run tasks from the named
 		// roles. Applied at the top level so a filtered-out block is skipped as
@@ -1047,9 +1058,21 @@ func (e *Executor) runTask(ctx context.Context, pctx *PlayContext, task *playboo
 		}
 	}
 
-	// Assert built-in task keyword: evaluate locally, bypass connector/module.
+	// Built-in task keywords: evaluate locally, bypass connector/module.
 	if task.IsAssert() {
 		return e.executeAssert(ctx, pctx, task, eTags)
+	}
+	if task.IsSetFact() {
+		return e.executeSetFact(ctx, pctx, task, eTags)
+	}
+	if task.IsDebug() {
+		return e.executeDebug(ctx, pctx, task, eTags)
+	}
+	if task.IsFail() {
+		return e.executeFail(ctx, pctx, task, eTags)
+	}
+	if task.IsMeta() {
+		return e.executeMeta(ctx, pctx, task, eTags)
 	}
 
 	// Resolve loop expression (e.g. "{{ windmill_files }}") to a concrete list
@@ -1356,7 +1379,9 @@ func (e *Executor) runHandlersExpanded(ctx context.Context, pctx *PlayContext, s
 
 		stats.Tasks++
 
-		result, err := e.runSingleTask(ctx, pctx, handler, eTags)
+		// Dispatch through runTask so handlers may be built-in tasks
+		// (debug/set_fact/…) as well as modules.
+		result, err := e.runTask(ctx, pctx, handler, eTags)
 		if err != nil {
 			stats.Failed++
 			return fmt.Errorf("handler '%s' failed: %w", handler.Name, err)
@@ -1881,6 +1906,42 @@ func (e *Executor) planTasks(ctx context.Context, pctx *PlayContext, tasks []*pl
 					if err != nil || !shouldRun {
 						pt.Status = "will_skip"
 						pt.Reason = "when: " + task.When
+					}
+				}
+			}
+			if task.Register != "" {
+				registeredNames[task.Register] = true
+			}
+			record(pt)
+			continue
+		}
+
+		// Handle glue built-in tasks (set_fact, debug, fail, meta) in plan phase.
+		if task.IsBuiltin() {
+			pt := output.PlannedTask{
+				Host:   pctx.Host,
+				Name:   task.String(),
+				Module: builtinModuleName(task),
+				Status: "will_run",
+				Tags:   eTags,
+			}
+			if task.When != "" {
+				if e.conditionReferencesRegistered(task.When, registeredNames) {
+					pt.Status = "conditional"
+					pt.Reason = task.When
+				} else {
+					shouldRun, err := e.evaluateCondition(task.When, pctx)
+					if err != nil || !shouldRun {
+						pt.Status = "will_skip"
+						pt.Reason = "when: " + task.When
+					}
+				}
+			}
+			// Apply set_fact during planning so later plan lines resolve the vars.
+			if task.IsSetFact() && pt.Status != "will_skip" {
+				if resolved, err := e.interpolateParams(ctx, task.SetFact, pctx); err == nil {
+					for k, v := range resolved {
+						pctx.Vars[k] = v
 					}
 				}
 			}

@@ -209,6 +209,36 @@ type Task struct {
 	// evaluates boolean expressions locally via the condition engine
 	// instead of dispatching to a module.
 	Assert *AssertSpec `yaml:"-"`
+
+	// SetFact, if non-nil, makes this a built-in set_fact task that sets the
+	// given variables (values interpolated) into the play vars.
+	SetFact map[string]any `yaml:"-"`
+
+	// Debug, if non-nil, makes this a built-in debug task that prints a message
+	// or the value of a variable.
+	Debug *DebugSpec `yaml:"-"`
+
+	// Fail, if non-nil, makes this a built-in fail task that fails the play with
+	// a message (typically gated with when:).
+	Fail *FailSpec `yaml:"-"`
+
+	// Meta, if non-empty, makes this a built-in meta task. Supported value:
+	// "flush_handlers" (run pending notified handlers immediately).
+	Meta string `yaml:"-"`
+}
+
+// DebugSpec holds the parameters for a `debug:` task.
+type DebugSpec struct {
+	// Msg is a message to print (interpolated). Mutually exclusive with Var.
+	Msg string
+	// Var is the name of a variable whose value to print.
+	Var string
+}
+
+// FailSpec holds the parameters for a `fail:` task.
+type FailSpec struct {
+	// Msg is the failure message (interpolated). Defaults when empty.
+	Msg string
 }
 
 // AssertSpec holds the parameters for an `assert:` task.
@@ -288,6 +318,31 @@ func (t *Task) IsBlock() bool {
 // IsAssert returns true if this task is a built-in assert task.
 func (t *Task) IsAssert() bool {
 	return t.Assert != nil
+}
+
+// IsSetFact returns true if this task is a built-in set_fact task.
+func (t *Task) IsSetFact() bool {
+	return t.SetFact != nil
+}
+
+// IsDebug returns true if this task is a built-in debug task.
+func (t *Task) IsDebug() bool {
+	return t.Debug != nil
+}
+
+// IsFail returns true if this task is a built-in fail task.
+func (t *Task) IsFail() bool {
+	return t.Fail != nil
+}
+
+// IsMeta returns true if this task is a built-in meta task.
+func (t *Task) IsMeta() bool {
+	return t.Meta != ""
+}
+
+// IsBuiltin returns true if this task is any built-in (non-module) task.
+func (t *Task) IsBuiltin() bool {
+	return t.IsAssert() || t.IsSetFact() || t.IsDebug() || t.IsFail() || t.IsMeta()
 }
 
 // ShouldSudo returns whether privilege escalation is enabled for this task.
@@ -395,6 +450,19 @@ func (t *Task) Validate() error {
 		return nil
 	}
 
+	if t.IsBuiltin() {
+		if t.Module != "" {
+			return fmt.Errorf("%s task cannot also specify a module (%s)", t.String(), t.Module)
+		}
+		if t.IsMeta() && t.Meta != "flush_handlers" {
+			return fmt.Errorf("meta: unsupported value %q (supported: flush_handlers)", t.Meta)
+		}
+		if t.IsDebug() && t.Debug.Msg != "" && t.Debug.Var != "" {
+			return fmt.Errorf("debug task: 'msg' and 'var' are mutually exclusive")
+		}
+		return nil
+	}
+
 	if t.Module == "" && t.Include == "" {
 		return fmt.Errorf("task has no module specified")
 	}
@@ -414,6 +482,18 @@ func (t *Task) Validate() error {
 func (t *Task) String() string {
 	if t.Name != "" {
 		return t.Name
+	}
+	if t.IsSetFact() {
+		return "set_fact"
+	}
+	if t.IsDebug() {
+		return "debug"
+	}
+	if t.IsFail() {
+		return "fail"
+	}
+	if t.IsMeta() {
+		return "meta: " + t.Meta
 	}
 	if t.IsBlock() {
 		return "block"

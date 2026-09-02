@@ -52,6 +52,11 @@ var knownTaskFields = map[string]bool{
 	"always": true,
 	// Assert built-in task keyword
 	"assert": true,
+	// Glue built-in task keywords
+	"set_fact": true,
+	"debug":    true,
+	"fail":     true,
+	"meta":     true,
 	// Tags
 	"tags": true,
 	// Module argument keys that Ansible allows at task level
@@ -458,6 +463,24 @@ func parseRawTask(raw map[string]any) (*Task, error) {
 		task.Assert = spec
 	}
 
+	// Parse set_fact / debug / fail / meta built-in task keywords
+	if sfRaw, ok := raw["set_fact"]; ok {
+		sf, err := parseSetFactSpec(sfRaw)
+		if err != nil {
+			return nil, fmt.Errorf("set_fact: %w", err)
+		}
+		task.SetFact = sf
+	}
+	if dbgRaw, ok := raw["debug"]; ok {
+		task.Debug = parseDebugSpec(dbgRaw)
+	}
+	if failRaw, ok := raw["fail"]; ok {
+		task.Fail = parseFailSpec(failRaw)
+	}
+	if metaRaw, ok := raw["meta"].(string); ok {
+		task.Meta = strings.TrimSpace(metaRaw)
+	}
+
 	// Parse vars on include/include_tasks directives
 	if vars, ok := raw["vars"].(map[string]any); ok {
 		task.IncludeVars = vars
@@ -540,6 +563,61 @@ func parseRawTask(raw map[string]any) (*Task, error) {
 	}
 
 	return task, nil
+}
+
+// parseSetFactSpec parses the `set_fact:` mapping of variable names to values.
+func parseSetFactSpec(raw any) (map[string]any, error) {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("expected a mapping of variable names to values")
+	}
+	if len(m) == 0 {
+		return nil, fmt.Errorf("at least one variable is required")
+	}
+	// Copy so later mutation of the raw map doesn't leak in.
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// parseDebugSpec parses the `debug:` task. It accepts a string shorthand
+// (treated as msg) or a mapping with `msg` / `var` keys.
+func parseDebugSpec(raw any) *DebugSpec {
+	switch v := raw.(type) {
+	case string:
+		return &DebugSpec{Msg: v}
+	case map[string]any:
+		spec := &DebugSpec{}
+		if msg, ok := v["msg"].(string); ok {
+			spec.Msg = msg
+		}
+		if vn, ok := v["var"].(string); ok {
+			spec.Var = vn
+		}
+		return spec
+	default:
+		// A bare debug: with no recognizable payload still prints a default line.
+		return &DebugSpec{}
+	}
+}
+
+// parseFailSpec parses the `fail:` task. It accepts a string shorthand
+// (treated as msg) or a mapping with a `msg` key.
+func parseFailSpec(raw any) *FailSpec {
+	switch v := raw.(type) {
+	case string:
+		return &FailSpec{Msg: v}
+	case map[string]any:
+		spec := &FailSpec{}
+		if msg, ok := v["msg"].(string); ok {
+			spec.Msg = msg
+		}
+		return spec
+	default:
+		return &FailSpec{}
+	}
 }
 
 // parseAssertSpec parses the `assert:` task block into an AssertSpec.
@@ -697,7 +775,7 @@ func ExpandShorthand(task *Task) {
 // Built-in task keywords (assert, block, include_tasks) have no module and
 // are always valid at this layer.
 func ResolveModule(task *Task) error {
-	if task.IsAssert() || task.IsBlock() || task.Include != "" {
+	if task.IsBuiltin() || task.IsBlock() || task.Include != "" {
 		return nil
 	}
 	if task.Module == "" {
