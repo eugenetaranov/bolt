@@ -1289,6 +1289,33 @@ func (e *Executor) applyBecome(pctx *PlayContext, task *playbook.Task) func() {
 	return func() {}
 }
 
+// applyEnv sets the merged play+task environment on the connector (task wins)
+// and returns a restore func that clears it. Values are interpolated. It is a
+// no-op on connectors that don't implement connector.EnvSetter.
+func (e *Executor) applyEnv(ctx context.Context, pctx *PlayContext, task *playbook.Task) func() {
+	setter, ok := pctx.Connector.(connector.EnvSetter)
+	if !ok {
+		return func() {}
+	}
+	merged := make(map[string]string, len(pctx.Play.Environment)+len(task.Environment))
+	for k, v := range pctx.Play.Environment {
+		merged[k] = v
+	}
+	for k, v := range task.Environment {
+		merged[k] = v
+	}
+	if len(merged) == 0 {
+		return func() {}
+	}
+	for k, v := range merged {
+		if iv, err := e.interpolateString(ctx, v, pctx); err == nil {
+			merged[k] = fmt.Sprintf("%v", iv)
+		}
+	}
+	setter.SetEnv(merged)
+	return func() { setter.SetEnv(nil) }
+}
+
 // firstNonEmpty returns the first non-empty string.
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
@@ -1315,6 +1342,9 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 	// Apply privilege escalation (sudo enable + become_user/become_method),
 	// restoring the play defaults after the task.
 	defer e.applyBecome(pctx, task)()
+
+	// Apply environment (play + task, task wins), restoring after the task.
+	defer e.applyEnv(ctx, pctx, task)()
 
 	// Expand shorthand syntax
 	playbook.ExpandShorthand(task)
@@ -1368,9 +1398,23 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 		}
 
 		result, lastErr = mod.Run(ctx, pctx.Connector, params)
-		if lastErr == nil {
+		if lastErr != nil {
+			continue // retry on hard error
+		}
+		if task.Until == "" {
 			break
 		}
+		// until: retry until the condition holds against the result.
+		d, c, msg := taskResultFields(result, nil)
+		ok, cerr := e.evaluateResultCondition(task.Until, pctx, resultEvalVars(d, c, msg))
+		if cerr != nil {
+			lastErr = cerr
+			break
+		}
+		if ok {
+			break
+		}
+		lastErr = fmt.Errorf("until condition not met after %d attempt(s): %s", attempt, task.Until)
 	}
 
 	// Assemble the canonical result data. This is available even when the
@@ -1382,13 +1426,7 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 	// Variables exposed to changed_when / failed_when expressions: the hoisted
 	// result data keys (e.g. exit_code, stdout), plus changed/message and a
 	// nested `result` map for dotted access.
-	evalVars := make(map[string]any, len(data)+3)
-	for k, v := range data {
-		evalVars[k] = v
-	}
-	evalVars["changed"] = changed
-	evalVars["message"] = message
-	evalVars["result"] = map[string]any{"changed": changed, "message": message, "data": data}
+	evalVars := resultEvalVars(data, changed, message)
 
 	// failed_when: when set, the task's failure is determined solely by the
 	// expression (Ansible semantics), overriding a module error or success.
@@ -1464,6 +1502,20 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 		Changed: changed,
 		Data:    data,
 	}, nil
+}
+
+// resultEvalVars builds the variable set exposed to changed_when / failed_when
+// / until expressions: the hoisted result data keys plus changed/message and a
+// nested `result` map for dotted access.
+func resultEvalVars(data map[string]any, changed bool, message string) map[string]any {
+	ev := make(map[string]any, len(data)+3)
+	for k, v := range data {
+		ev[k] = v
+	}
+	ev["changed"] = changed
+	ev["message"] = message
+	ev["result"] = map[string]any{"changed": changed, "message": message, "data": data}
+	return ev
 }
 
 // taskResultFields extracts the result data, changed flag, and message from a

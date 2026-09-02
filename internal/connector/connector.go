@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -77,6 +78,36 @@ type BecomeConfig struct {
 // honor become_user / become_method.
 type Becomer interface {
 	SetBecome(cfg BecomeConfig)
+}
+
+// EnvSetter is an optional connector capability for setting environment
+// variables applied to subsequent commands (the `environment:` directive).
+type EnvSetter interface {
+	SetEnv(env map[string]string)
+}
+
+// PrependEnv prefixes cmd with `export K=V;` assignments so the variables apply
+// to the whole command — surviving compound commands and the `sudo … sh -c`
+// wrapping WrapBecome adds. Keys are sorted for deterministic output.
+func PrependEnv(cmd string, env map[string]string) string {
+	if len(env) == 0 {
+		return cmd
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString("export ")
+		b.WriteString(k)
+		b.WriteString("=")
+		b.WriteString(ShellQuote(env[k]))
+		b.WriteString("; ")
+	}
+	b.WriteString(cmd)
+	return b.String()
 }
 
 // Method constants for BecomeConfig.Method.

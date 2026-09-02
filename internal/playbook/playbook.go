@@ -167,6 +167,10 @@ type Play struct {
 	// BecomeMethod is the escalation method: sudo (default), su, or doas.
 	BecomeMethod string `yaml:"become_method"`
 
+	// Environment holds environment variables applied to all tasks in the play
+	// (task-level environment overrides these).
+	Environment map[string]string `yaml:"environment"`
+
 	// GatherFacts controls whether to gather system facts (default: true).
 	GatherFacts *bool `yaml:"gather_facts"`
 
@@ -276,6 +280,13 @@ type Task struct {
 	// plan and apply output (text and JSON), so secrets interpolated into the
 	// task never reach logs or CI output.
 	NoLog bool `yaml:"no_log"`
+
+	// Until is a condition retried (up to Retries times, Delay apart) until it
+	// evaluates true. Evaluated against the task result (e.g. stdout, exit_code).
+	Until string `yaml:"until"`
+
+	// Environment holds environment variables applied to this task's commands.
+	Environment map[string]string `yaml:"environment"`
 
 	// Tags are labels used for selective task execution via --tags/--skip-tags.
 	Tags []string `yaml:"-"`

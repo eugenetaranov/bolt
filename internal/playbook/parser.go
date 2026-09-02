@@ -46,6 +46,8 @@ var knownTaskFields = map[string]bool{
 	"changed_when":  true,
 	"failed_when":   true,
 	"no_log":        true,
+	"until":         true,
+	"environment":   true,
 	"include":       true,
 	"include_tasks": true,
 	"vars":          true,
@@ -291,6 +293,12 @@ func parseRawPlay(raw map[string]any) (*Play, error) {
 	if v, ok := raw["become_method"].(string); ok {
 		play.BecomeMethod = v
 	}
+	if env, ok := raw["environment"].(map[string]any); ok {
+		play.Environment = make(map[string]string, len(env))
+		for k, val := range env {
+			play.Environment[k] = fmt.Sprintf("%v", val)
+		}
+	}
 	switch v := raw["serial"].(type) {
 	case int:
 		play.Serial = SerialSpec{strconv.Itoa(v)}
@@ -451,6 +459,15 @@ func parseRawTask(raw map[string]any) (*Task, error) {
 	}
 	if v, ok := asBool(raw["no_log"]); ok {
 		task.NoLog = v
+	}
+	if v, ok := raw["until"].(string); ok {
+		task.Until = v
+	}
+	if env, ok := raw["environment"].(map[string]any); ok {
+		task.Environment = make(map[string]string, len(env))
+		for k, val := range env {
+			task.Environment[k] = fmt.Sprintf("%v", val)
+		}
 	}
 	if v, ok := raw["include"].(string); ok {
 		task.Include = v

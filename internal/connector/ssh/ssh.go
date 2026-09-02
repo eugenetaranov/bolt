@@ -48,6 +48,7 @@ type Connector struct {
 	sudoPassword    string
 	becomeMethod    string
 	becomeUser      string
+	env             map[string]string
 	insecureHostKey bool
 
 	// passwordPrompt, if set, is called lazily to obtain a password for
@@ -740,6 +741,7 @@ func loadKey(path string) (ssh.Signer, error) {
 // buildCommand wraps the command with sudo if configured, returning any stdin
 // bytes (the sudo password) that must be fed to the process.
 func (c *Connector) buildCommand(cmd string) (string, []byte) {
+	cmd = connector.PrependEnv(cmd, c.env)
 	return connector.WrapBecome(cmd, connector.BecomeConfig{
 		Enabled:  c.sudo,
 		Method:   c.becomeMethod,
@@ -762,6 +764,10 @@ func (c *Connector) SetBecome(cfg connector.BecomeConfig) {
 	c.becomeMethod = cfg.Method
 	c.becomeUser = cfg.User
 }
+
+// SetEnv sets environment variables applied to subsequent commands.
+// Implements connector.EnvSetter.
+func (c *Connector) SetEnv(env map[string]string) { c.env = env }
 
 // getSFTPClient returns a cached SFTP client or creates a new one.
 func (c *Connector) getSFTPClient() (*sftp.Client, error) {

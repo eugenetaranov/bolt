@@ -22,6 +22,7 @@ type Connector struct {
 	sudoPassword string
 	becomeMethod string
 	becomeUser   string
+	env          map[string]string
 }
 
 // Option configures the local connector.
@@ -128,6 +129,7 @@ func (c *Connector) buildCommand(cmd string) (string, []byte) {
 	if u, err := user.Current(); err == nil && u.Uid == "0" {
 		isRoot = true
 	}
+	cmd = connector.PrependEnv(cmd, c.env)
 	return connector.WrapBecome(cmd, connector.BecomeConfig{
 		Enabled:  c.sudo,
 		Method:   c.becomeMethod,
@@ -150,6 +152,10 @@ func (c *Connector) SetBecome(cfg connector.BecomeConfig) {
 	c.becomeMethod = cfg.Method
 	c.becomeUser = cfg.User
 }
+
+// SetEnv sets environment variables applied to subsequent commands.
+// Implements connector.EnvSetter.
+func (c *Connector) SetEnv(env map[string]string) { c.env = env }
 
 // Upload writes content from src to a local file at dst.
 // When sudo is enabled and the current user is not root, writes to a

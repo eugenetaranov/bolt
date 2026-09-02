@@ -82,6 +82,7 @@ type Connector struct {
 	sudoPassword   string
 	becomeMethod   string
 	becomeUser     string
+	env            map[string]string
 	attachS3Policy bool // temporarily grant the instance's role S3 access for transfers
 	ssmClient      ssmAPI
 	s3Client       s3API
@@ -454,6 +455,10 @@ func (c *Connector) SetBecome(cfg connector.BecomeConfig) {
 	c.becomeUser = cfg.User
 }
 
+// SetEnv sets environment variables applied to subsequent commands.
+// Implements connector.EnvSetter.
+func (c *Connector) SetEnv(env map[string]string) { c.env = env }
+
 // Close removes any temporary IAM policy this connector attached via
 // WithAutoIAMPolicy (best-effort), then returns. SSM itself has no
 // persistent connection to tear down.
@@ -492,7 +497,7 @@ func (c *Connector) String() string {
 // the supported setup for SSM targets. Setting TACK_SSM_ALLOW_SUDO_PASSWORD
 // overrides this for accounts that accept the exposure.
 func (c *Connector) buildCommand(cmd string) (string, error) {
-	wrapped, stdin := connector.WrapBecome(cmd, connector.BecomeConfig{
+	wrapped, stdin := connector.WrapBecome(connector.PrependEnv(cmd, c.env), connector.BecomeConfig{
 		Enabled:  c.sudo,
 		Method:   c.becomeMethod,
 		User:     c.becomeUser,
