@@ -251,6 +251,9 @@ type Task struct {
 	// LoopVar is the variable name for the current item (default: "item").
 	LoopVar string `yaml:"loop_var"`
 
+	// LoopControl holds loop_control options (loop_var, label).
+	LoopControl *LoopControl `yaml:"-"`
+
 	// IgnoreErrors continues execution even if the task fails.
 	IgnoreErrors bool `yaml:"ignore_errors"`
 
@@ -448,8 +451,20 @@ func (t *Task) ShouldSudo(playSudo bool) bool {
 	return playSudo
 }
 
+// LoopControl holds loop_control options.
+type LoopControl struct {
+	// LoopVar overrides the per-item variable name (default "item").
+	LoopVar string
+	// Label is an interpolated template shown per iteration instead of the raw
+	// item (useful to avoid printing secrets or large structures).
+	Label string
+}
+
 // GetLoopVar returns the loop variable name, defaulting to "item".
 func (t *Task) GetLoopVar() string {
+	if t.LoopControl != nil && t.LoopControl.LoopVar != "" {
+		return t.LoopControl.LoopVar
+	}
 	if t.LoopVar == "" {
 		return "item"
 	}

@@ -37,6 +37,7 @@ var knownTaskFields = map[string]bool{
 	"loop":          true,
 	"with_items":    true,
 	"loop_var":      true,
+	"loop_control":  true,
 	"ignore_errors": true,
 	"retries":       true,
 	"delay":         true,
@@ -432,6 +433,16 @@ func parseRawTask(raw map[string]any) (*Task, error) {
 	}
 	if v, ok := raw["loop_var"].(string); ok {
 		task.LoopVar = v
+	}
+	if lc, ok := raw["loop_control"].(map[string]any); ok {
+		control := &LoopControl{}
+		if v, ok := lc["loop_var"].(string); ok {
+			control.LoopVar = v
+		}
+		if v, ok := lc["label"].(string); ok {
+			control.Label = v
+		}
+		task.LoopControl = control
 	}
 	if v, ok := raw["ignore_errors"].(bool); ok {
 		task.IgnoreErrors = v

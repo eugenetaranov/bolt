@@ -268,6 +268,10 @@ type PlayContext struct {
 	// flushes (meta: flush_handlers) can record their results.
 	Stats *Stats
 
+	// IterLabel is a per-iteration display label set during a loop (from
+	// loop_control.label); appended to the task name in output when non-empty.
+	IterLabel string
+
 	// Connector is the connection to the target.
 	Connector connector.Connector
 
@@ -1335,6 +1339,9 @@ func firstNonEmpty(vals ...string) string {
 
 func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *playbook.Task, eTags []string) (*TaskResult, error) {
 	taskName := taskDisplayName(task)
+	if pctx.IterLabel != "" {
+		taskName += " => " + pctx.IterLabel
+	}
 	pctx.Output.TaskStart(taskName, task.Module)
 
 	// redact hides a task's result message/error from output when no_log is set,
@@ -1568,21 +1575,45 @@ func (e *Executor) evaluateResultCondition(expr string, pctx *PlayContext, evalV
 	return e.evaluateCondition(expr, pctx)
 }
 
-// runTaskLoop executes a task for each item in a loop.
+// runTaskLoop executes a task for each item in a loop. When the task uses
+// register, the registered var aggregates every iteration under a `results`
+// list (not just the last item), matching Ansible.
 func (e *Executor) runTaskLoop(ctx context.Context, pctx *PlayContext, task *playbook.Task, eTags []string) (*TaskResult, error) {
 	loopVar := task.GetLoopVar()
 	var anyChanged bool
+	results := make([]any, 0, len(task.Loop))
+
+	labelTmpl := ""
+	if task.LoopControl != nil {
+		labelTmpl = task.LoopControl.Label
+	}
 
 	for i, item := range task.Loop {
 		// Set loop variable
 		pctx.Vars[loopVar] = item
 		pctx.Vars["loop_index"] = i
 
-		result, err := e.runSingleTask(ctx, pctx, task, eTags)
-		if err != nil {
-			return result, err
+		// Per-iteration display label (loop_control.label), interpolated.
+		if labelTmpl != "" {
+			if v, err := e.interpolateString(ctx, labelTmpl, pctx); err == nil {
+				pctx.IterLabel = fmt.Sprintf("%v", v)
+			}
 		}
 
+		result, err := e.runSingleTask(ctx, pctx, task, eTags)
+		pctx.IterLabel = ""
+
+		// Capture this iteration's registered result (set for both success and
+		// failure paths inside runSingleTask) before it's overwritten.
+		if task.Register != "" {
+			if r, ok := pctx.Registered[task.Register]; ok {
+				results = append(results, r)
+			}
+		}
+		if err != nil {
+			e.storeLoopResults(pctx, task, results, anyChanged || (result != nil && result.Changed))
+			return result, err
+		}
 		if result.Changed {
 			anyChanged = true
 		}
@@ -1592,12 +1623,24 @@ func (e *Executor) runTaskLoop(ctx context.Context, pctx *PlayContext, task *pla
 	delete(pctx.Vars, loopVar)
 	delete(pctx.Vars, "loop_index")
 
+	e.storeLoopResults(pctx, task, results, anyChanged)
+
 	status := "ok"
 	if anyChanged {
 		status = "changed"
 	}
 
 	return &TaskResult{Status: status, Changed: anyChanged}, nil
+}
+
+// storeLoopResults writes the aggregated loop register value ({results, changed}).
+func (e *Executor) storeLoopResults(pctx *PlayContext, task *playbook.Task, results []any, changed bool) {
+	if task.Register == "" {
+		return
+	}
+	agg := map[string]any{"results": results, "changed": changed}
+	pctx.Registered[task.Register] = agg
+	pctx.Vars[task.Register] = agg
 }
 
 // runHandlersExpanded executes notified handlers from the expanded handlers list.
