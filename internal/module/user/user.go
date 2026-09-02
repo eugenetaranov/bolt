@@ -195,7 +195,9 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 	system := module.GetBool(params, "system", false)
 	password := module.GetString(params, "password", "")
 	groups := module.GetStringSlice(params, "groups")
-	group := module.GetString(params, "group", "") // primary group (name or gid)
+	group := module.GetString(params, "group", "")                            // primary group (name or gid)
+	appendGroups := module.GetBool(params, "append", true)                    // false = exact group set
+	updatePassword := module.GetString(params, "update_password", "always")   // always | on_create
 
 	if !info.Exists {
 		cmd := "useradd"
@@ -254,8 +256,11 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 		}
 	}
 
-	if password != "" {
-		// Always set password when specified — we can't compare hashes from /etc/shadow without root
+	// Set the password on an existing user only when update_password is
+	// "always" (the default). "on_create" leaves an existing hash untouched so
+	// re-runs don't churn it. We can't compare hashes without root, so when we
+	// do set it, we always report it.
+	if password != "" && updatePassword != "on_create" {
 		modArgs = append(modArgs, "-p", connector.ShellQuote(password))
 		modifications = append(modifications, "password updated")
 	}
@@ -265,9 +270,27 @@ func (m *Module) Run(ctx context.Context, conn connector.Connector, params map[s
 		copy(desired, groups)
 		sort.Strings(desired)
 
-		if !stringSliceEqual(desired, info.Groups) {
-			modArgs = append(modArgs, "-aG", strings.Join(groups, ","))
-			modifications = append(modifications, fmt.Sprintf("groups updated to include %s", strings.Join(groups, ",")))
+		if appendGroups {
+			// Additive: only change when a desired group is missing.
+			cur := make(map[string]bool, len(info.Groups))
+			for _, g := range info.Groups {
+				cur[g] = true
+			}
+			var missing bool
+			for _, g := range groups {
+				if !cur[g] {
+					missing = true
+					break
+				}
+			}
+			if missing {
+				modArgs = append(modArgs, "-aG", strings.Join(groups, ","))
+				modifications = append(modifications, fmt.Sprintf("groups updated to include %s", strings.Join(groups, ",")))
+			}
+		} else if !stringSliceEqual(desired, info.Groups) {
+			// Exclusive: enforce exactly this set (removes extras).
+			modArgs = append(modArgs, "-G", strings.Join(groups, ","))
+			modifications = append(modifications, fmt.Sprintf("groups set to %s", strings.Join(groups, ",")))
 		}
 	}
 
@@ -370,9 +393,11 @@ func (m *Module) Parameters() []module.ParamDoc {
 		{Name: "shell", Type: "string", Description: "Login shell (e.g., /bin/bash)"},
 		{Name: "home", Type: "string", Description: "Home directory path"},
 		{Name: "group", Type: "string", Description: "Primary group (name or gid)"},
-		{Name: "groups", Type: "[]string", Description: "Supplementary groups (appended to existing)"},
+		{Name: "groups", Type: "[]string", Description: "Supplementary groups"},
+		{Name: "append", Type: "bool", Default: "true", Description: "Append groups; false enforces exactly the given set"},
 		{Name: "system", Type: "bool", Default: "false", Description: "Create a system user"},
 		{Name: "password", Type: "string", Description: "Pre-hashed password (e.g., SHA-512 crypt format)"},
+		{Name: "update_password", Type: "string", Default: "always", Description: "always, or on_create to set only for new users"},
 		{Name: "remove", Type: "bool", Default: "false", Description: "Remove home directory when state=absent"},
 	}
 }

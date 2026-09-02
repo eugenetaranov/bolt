@@ -24,6 +24,7 @@ import (
 
 	// Import modules to register them
 	_ "github.com/tackhq/tack/internal/module/apt"
+	_ "github.com/tackhq/tack/internal/module/authorizedkey"
 	_ "github.com/tackhq/tack/internal/module/blockinfile"
 	_ "github.com/tackhq/tack/internal/module/brew"
 	_ "github.com/tackhq/tack/internal/module/command"
