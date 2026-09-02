@@ -16,10 +16,46 @@ import (
 	"golang.org/x/term"
 )
 
+// zero overwrites a byte slice, best-effort scrubbing of secret material.
+func zero(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+// secureVaultTempDir creates a private 0700 directory for editing decrypted
+// vault content. The plaintext file (and any editor swap/backup files created
+// alongside it) stay inside this dir on the user's temp filesystem, and the
+// returned cleanup removes the whole directory. This avoids leaving cleartext
+// or editor swap files loose in a world-listable /tmp.
+func secureVaultTempDir() (dir string, cleanup func(), err error) {
+	dir, err = os.MkdirTemp("", "tack-vault-")
+	if err != nil {
+		return "", nil, err
+	}
+	// os.MkdirTemp already uses 0700; enforce it explicitly for defense.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, err
+	}
+	return dir, func() { _ = os.RemoveAll(dir) }, nil
+}
+
 // vaultCmd is the parent command for vault operations.
 var vaultCmd = &cobra.Command{
 	Use:   "vault",
 	Short: "Manage encrypted vault files",
+	Long: `Manage encrypted vault files (AES-256-GCM).
+
+Password sources, most to least secure:
+  --vault-password-file <path>   read the first line of a file
+  interactive prompt             typed, never stored
+  TACK_VAULT_PASSWORD env var    convenient but readable via /proc/<pid>/environ
+                                 by same-uid and root processes; avoid on shared
+                                 or multi-tenant hosts.
+
+While editing, decrypted content and any editor swap/backup files are kept in a
+private 0700 temp directory and removed on exit.`,
 }
 
 // vaultInitCmd creates a new encrypted vault file.
@@ -157,19 +193,15 @@ func runVaultInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		for i := range pw {
-			pw[i] = 0
-		}
-	}()
+	defer zero(pw)
 
-	// D-07: Write scaffold content to temp file in os.TempDir()
+	// Write scaffold content to a private 0700 dir (contains editor swap files).
 	scaffoldContent := "# Add your secrets as YAML key-value pairs below\ndb_password: changeme\n"
-	tmpFile, err := os.CreateTemp("", "tack-vault-*.yaml")
+	tmpDir, cleanupDir, err := secureVaultTempDir()
 	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
+		return fmt.Errorf("creating secure temp dir: %w", err)
 	}
-	tmpPath := tmpFile.Name()
+	tmpPath := filepath.Join(tmpDir, "vault.yaml")
 
 	// D-11/CLI-04: Wire cleanup to signal context + defer
 	ctx, cancel := signalContext(context.Background())
@@ -177,16 +209,12 @@ func runVaultInit(cmd *cobra.Command, args []string) error {
 
 	go func() {
 		<-ctx.Done()
-		os.Remove(tmpPath)
+		cleanupDir()
 	}()
-	defer os.Remove(tmpPath)
+	defer cleanupDir()
 
-	if _, err := tmpFile.Write([]byte(scaffoldContent)); err != nil {
-		tmpFile.Close()
+	if err := os.WriteFile(tmpPath, []byte(scaffoldContent), 0o600); err != nil {
 		return fmt.Errorf("writing scaffold to temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("closing temp file: %w", err)
 	}
 
 	// Launch editor
@@ -199,6 +227,7 @@ func runVaultInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("reading edited file: %w", err)
 	}
+	defer zero(edited)
 
 	// Encrypt the content
 	encrypted, err := vault.Encrypt(edited, pw)
@@ -233,25 +262,22 @@ func runVaultEdit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Scrub the password no matter which path we return through.
+	defer zero(pw)
+
 	// Decrypt vault content
 	plaintext, err := vault.Decrypt(data, pw)
 	if err != nil {
-		// Zero password on decryption failure
-		for i := range pw {
-			pw[i] = 0
-		}
 		return fmt.Errorf("decrypting vault: %w", err)
 	}
+	defer zero(plaintext)
 
-	// D-10/D-03: Write plaintext to temp file in os.TempDir()
-	tmpFile, err := os.CreateTemp("", "tack-vault-*.yaml")
+	// Write plaintext to a private 0700 dir (contains editor swap files too).
+	tmpDir, cleanupDir, err := secureVaultTempDir()
 	if err != nil {
-		for i := range pw {
-			pw[i] = 0
-		}
-		return fmt.Errorf("creating temp file: %w", err)
+		return fmt.Errorf("creating secure temp dir: %w", err)
 	}
-	tmpPath := tmpFile.Name()
+	tmpPath := filepath.Join(tmpDir, "vault.yaml")
 
 	// D-11/CLI-04: Wire cleanup to signal context + defer
 	ctx, cancel := signalContext(context.Background())
@@ -259,57 +285,35 @@ func runVaultEdit(cmd *cobra.Command, args []string) error {
 
 	go func() {
 		<-ctx.Done()
-		os.Remove(tmpPath)
+		cleanupDir()
 	}()
-	defer os.Remove(tmpPath)
+	defer cleanupDir()
 
-	if _, err := tmpFile.Write(plaintext); err != nil {
-		tmpFile.Close()
-		for i := range pw {
-			pw[i] = 0
-		}
+	if err := os.WriteFile(tmpPath, plaintext, 0o600); err != nil {
 		return fmt.Errorf("writing temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		for i := range pw {
-			pw[i] = 0
-		}
-		return fmt.Errorf("closing temp file: %w", err)
 	}
 
 	// Launch editor
 	if err := launchEditor(ctx, tmpPath); err != nil {
 		// D-02: Non-zero editor exit → abort, keep original vault unchanged
-		for i := range pw {
-			pw[i] = 0
-		}
 		return fmt.Errorf("editor exited with error: %w", err)
 	}
 
 	// Read edited content
 	edited, err := os.ReadFile(tmpPath)
 	if err != nil {
-		for i := range pw {
-			pw[i] = 0
-		}
 		return fmt.Errorf("reading edited file: %w", err)
 	}
+	defer zero(edited)
 
 	// D-04/CLI-05: No-op detection — skip re-encryption if content unchanged
 	if subtle.ConstantTimeCompare(plaintext, edited) == 1 {
-		for i := range pw {
-			pw[i] = 0
-		}
 		fmt.Fprintln(os.Stderr, "No changes detected, vault unchanged.")
 		return nil
 	}
 
 	// Re-encrypt with fresh salt/nonce
 	encrypted, err := vault.Encrypt(edited, pw)
-	// Zero password immediately after encrypt
-	for i := range pw {
-		pw[i] = 0
-	}
 	if err != nil {
 		return fmt.Errorf("encrypting vault: %w", err)
 	}
