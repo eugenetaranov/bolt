@@ -62,6 +62,7 @@ type Emitter interface {
 	SetDebug(enabled bool)
 	SetVerbose(enabled bool)
 	SetDiff(enabled bool)
+	SetDryRun(enabled bool)
 	DiffEnabled() bool
 }
 

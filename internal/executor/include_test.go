@@ -261,4 +261,5 @@ func (n *nullEmitter) SetColor(enabled bool)            {}
 func (n *nullEmitter) SetDebug(enabled bool)            {}
 func (n *nullEmitter) SetVerbose(enabled bool)          {}
 func (n *nullEmitter) SetDiff(enabled bool)             {}
+func (n *nullEmitter) SetDryRun(enabled bool)           {}
 func (n *nullEmitter) DiffEnabled() bool                { return false }

@@ -271,6 +271,10 @@ func (j *JSONEmitter) SetDiff(enabled bool) {
 	j.diff = enabled
 }
 
+// SetDryRun is a no-op for JSON output: machine consumers read the plan_task
+// events and the recap stats directly.
+func (j *JSONEmitter) SetDryRun(bool) {}
+
 // DiffEnabled returns whether diff mode is active.
 func (j *JSONEmitter) DiffEnabled() bool {
 	return j.diff

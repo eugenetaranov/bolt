@@ -124,9 +124,20 @@ simple YAML playbooks.
 
 Supports local execution, SSH, and AWS SSM connectors.`,
 	Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
+
+	// Don't dump the full usage/flag list after an operational error (a failed
+	// connection, a validation failure). Cobra still shows usage for genuine
+	// flag-parse errors. SilenceErrors stays false so "Error: …" still prints.
+	SilenceUsage: true,
 }
 
 func init() {
+	// On a flag-parse error, point at --help instead of dumping the full flag
+	// list (SilenceUsage suppresses the wall; this restores a short hint).
+	rootCmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		return fmt.Errorf("%w\nRun '%s --help' for usage", err, c.CommandPath())
+	})
+
 	// Global flags
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "Enable debug output with detailed task information")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
@@ -267,7 +278,7 @@ Examples:
   tack run setup.yaml -c ssh://deploy@web1 -c ssh://deploy@web2
   tack run setup.yaml -c ssh --hosts=web1,web2
   tack run setup.yaml --ssh-user=deploy --ssh-key=~/.ssh/deploy_key
-  TACK_SSH_HOSTS=web1,web2 tack run setup.yaml`,
+  TACK_HOSTS=web1,web2 tack run setup.yaml`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlaybook,
 }
@@ -506,6 +517,7 @@ func runPlaybook(cmd *cobra.Command, args []string) error {
 	exec.Output.SetDebug(debug)
 	exec.Output.SetVerbose(verbose)
 	exec.Output.SetDiff(showDiff)
+	exec.Output.SetDryRun(dryRun)
 
 	// Run playbook
 	result, err := exec.Run(ctx, pb)

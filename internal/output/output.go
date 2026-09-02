@@ -46,6 +46,7 @@ type Output struct {
 	debug       bool
 	verbose     bool
 	diff        bool
+	dryRun      bool
 	interactive bool
 	spin        *spinner
 	hostLabel   string // "host [conn]" of the open HostStart banner
@@ -102,6 +103,12 @@ func (o *Output) SetDiff(enabled bool) {
 	o.diff = enabled
 }
 
+// SetDryRun marks the run as check/dry-run so the RECAP reflects that no
+// changes were applied instead of showing misleading zero counters.
+func (o *Output) SetDryRun(enabled bool) {
+	o.dryRun = enabled
+}
+
 // DiffEnabled returns true if diff or verbose mode is active.
 func (o *Output) DiffEnabled() bool {
 	return o.diff || o.verbose
@@ -144,6 +151,16 @@ func (o *Output) PlaybookStart(path string) {
 
 // PlaybookEnd prints the playbook summary.
 func (o *Output) PlaybookEnd(stats Stats) {
+	// In dry-run the apply phase never runs, so the ok/changed/failed counters
+	// are all zero and contradict the plan above. Report an honest summary.
+	if o.dryRun {
+		o.printf("\n%s %s %s\n",
+			o.color(colorBold, "RECAP"),
+			o.color(colorCyan, "(dry run) no changes applied — see the plan above"),
+			o.color(colorGray, fmt.Sprintf("(%.2fs)", stats.GetDuration().Seconds())))
+		return
+	}
+
 	o.printf("\n%s ", o.color(colorBold, "RECAP"))
 
 	ok := o.color(colorGreen, fmt.Sprintf("ok=%d", stats.GetOK()))
