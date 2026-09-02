@@ -159,6 +159,7 @@ func init() {
 	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(ssmBucketCmd)
 	rootCmd.AddCommand(spinnerPreviewCmd)
+	rootCmd.AddCommand(initCmd)
 }
 
 // spinnerPreviewCmd animates each spinner style so you can preview them in a

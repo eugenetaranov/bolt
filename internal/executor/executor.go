@@ -622,6 +622,10 @@ func (e *Executor) runMultiHostPlay(ctx context.Context, play *playbook.Play, st
 	// --- Apply phase ---
 	hosts := play.Hosts
 
+	// Mark the PLAN → APPLY transition (only reached when there are changes to
+	// apply; dry-run and no-change runs returned above).
+	e.Output.Section("APPLY")
+
 	// Rolling batches / failure budget take a dedicated path; everything else
 	// uses the original single-batch apply with unchanged semantics.
 	if !play.Serial.IsEmpty() || play.MaxFailPercentage != 0 || play.AnyErrorsFatal {
@@ -1042,6 +1046,7 @@ func (e *Executor) runPlayOnHost(ctx context.Context, play *playbook.Play, stats
 
 	// Skip the plan preview + approval entirely and go straight to apply.
 	if e.skipPlanPhase() {
+		emitter.Section("APPLY")
 		return e.applyHostPlan(ctx, pctx, stats, allTasks, allHandlers)
 	}
 
@@ -1092,6 +1097,7 @@ func (e *Executor) runPlayOnHost(ctx context.Context, play *playbook.Play, stats
 		}
 	}
 
+	emitter.Section("APPLY")
 	return e.applyHostPlan(ctx, pctx, stats, allTasks, allHandlers)
 }
 
