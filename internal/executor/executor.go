@@ -1073,9 +1073,28 @@ func (e *Executor) runTask(ctx context.Context, pctx *PlayContext, task *playboo
 
 // runSingleTask executes a task once. eTags is the task's effective tag set,
 // forwarded to the result line for inline display.
+// taskDisplayName returns a name safe to print. For an unnamed no_log task,
+// task.String() would embed the params (which may contain secrets), so fall
+// back to the bare module name.
+func taskDisplayName(task *playbook.Task) string {
+	if task.NoLog && task.Name == "" && !task.IsBlock() && !task.IsAssert() {
+		return task.Module
+	}
+	return task.String()
+}
+
 func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *playbook.Task, eTags []string) (*TaskResult, error) {
-	taskName := task.String()
+	taskName := taskDisplayName(task)
 	pctx.Output.TaskStart(taskName, task.Module)
+
+	// redact hides a task's result message/error from output when no_log is set,
+	// so secrets interpolated into the task never reach logs or CI.
+	redact := func(s string) string {
+		if task.NoLog {
+			return output.NoLogPlaceholder
+		}
+		return s
+	}
 
 	// Handle task-level sudo override
 	playSudo := pctx.Play.Sudo
@@ -1209,7 +1228,7 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 		if ferr == nil {
 			ferr = fmt.Errorf("failed_when condition met: %s", task.FailedWhen)
 		}
-		pctx.Output.TaskResult(taskName, "failed", false, ferr.Error(), eTags)
+		pctx.Output.TaskResult(taskName, "failed", false, redact(ferr.Error()), eTags)
 		return &TaskResult{Status: "failed", Error: ferr}, ferr
 	}
 
@@ -1226,7 +1245,7 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 		status = "changed"
 	}
 
-	pctx.Output.TaskResult(taskName, status, changed, message, eTags)
+	pctx.Output.TaskResult(taskName, status, changed, redact(message), eTags)
 
 	return &TaskResult{
 		Status:  status,
@@ -1874,7 +1893,7 @@ func (e *Executor) planTasks(ctx context.Context, pctx *PlayContext, tasks []*pl
 
 		pt := output.PlannedTask{
 			Host:   pctx.Host,
-			Name:   task.String(),
+			Name:   taskDisplayName(task),
 			Module: task.Module,
 			Tags:   eTags,
 		}
@@ -1933,6 +1952,7 @@ func (e *Executor) planTasks(ctx context.Context, pctx *PlayContext, tasks []*pl
 			}
 			pt.Params = displayParams
 		}
+		pt.NoLog = task.NoLog
 
 		// Attempt check for tasks that will run
 		if pt.Status == "will_run" && resolveErr == nil && pctx.Connector != nil {

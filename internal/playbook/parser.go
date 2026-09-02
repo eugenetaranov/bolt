@@ -42,6 +42,7 @@ var knownTaskFields = map[string]bool{
 	"sudo":          true,
 	"changed_when":  true,
 	"failed_when":   true,
+	"no_log":        true,
 	"include":       true,
 	"include_tasks": true,
 	"vars":          true,
@@ -411,6 +412,9 @@ func parseRawTask(raw map[string]any) (*Task, error) {
 	}
 	if v, ok := raw["failed_when"].(string); ok {
 		task.FailedWhen = v
+	}
+	if v, ok := asBool(raw["no_log"]); ok {
+		task.NoLog = v
 	}
 	if v, ok := raw["include"].(string); ok {
 		task.Include = v

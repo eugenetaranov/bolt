@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -415,6 +416,10 @@ type PlannedTask struct {
 	// Tags is the task's effective tag set (own + inherited play/role/block),
 	// rendered as a dimmed [a,b] suffix so users can see what -t would match.
 	Tags []string
+
+	// NoLog suppresses this task's params and diff content from rendered output
+	// (the task set no_log: true because it handles secrets).
+	NoLog bool
 }
 
 // DisplayPlan renders the plan table showing what tasks will run.
@@ -533,12 +538,13 @@ func (o *Output) renderPlanTask(t PlannedTask) {
 
 	// Show task parameters.
 	paramIndent := strings.Repeat("  ", t.Indent) + "      "
-	for _, paramLine := range formatTaskParams(t.Module, t.Params) {
+	for _, paramLine := range formatTaskParams(t.Module, t.Params, t.NoLog) {
 		o.printf("%s%s\n", paramIndent, o.color(colorGray, paramLine))
 	}
 
-	// Show checksums or diff when content differs.
-	showDiff := o.verbose || o.diff
+	// Show checksums or diff when content differs. Diffs are suppressed for
+	// no_log tasks so rendered content can't leak secrets.
+	showDiff := (o.verbose || o.diff) && !t.NoLog
 	destPath := extractDestPath(t.Module, t.Params)
 
 	if t.OldChecksum != "" && t.NewChecksum != "" && t.OldChecksum != t.NewChecksum {
@@ -812,12 +818,12 @@ func (o *Output) renderMultiHostPlanLine(t PlannedTask, prefix string, colWidth 
 	o.printf("%s%s\n", o.color(col, strings.TrimRight(line, " ")), o.tagSuffix(t.Tags))
 
 	// Show task parameters
-	for _, paramLine := range formatTaskParams(t.Module, t.Params) {
+	for _, paramLine := range formatTaskParams(t.Module, t.Params, t.NoLog) {
 		o.printf("%s%s\n", contIndent, o.color(colorGray, paramLine))
 	}
 
-	// Show checksums or diff when content differs
-	showDiff := o.verbose || o.diff
+	// Show checksums or diff when content differs (suppressed for no_log).
+	showDiff := (o.verbose || o.diff) && !t.NoLog
 	destPath := extractDestPath(t.Module, t.Params)
 
 	if t.OldChecksum != "" && t.NewChecksum != "" && t.OldChecksum != t.NewChecksum {
@@ -916,8 +922,29 @@ func (o *Output) printDiffWithIndent(indent, oldPath, newPath, oldContent, newCo
 	}
 }
 
-// formatTaskParams returns display lines for key parameters of a task, based on module type.
-func formatTaskParams(module string, params map[string]any) []string {
+// redactedPlaceholder is shown in place of any value hidden for secret safety.
+const redactedPlaceholder = "<redacted>"
+
+// NoLogPlaceholder is shown in place of a whole task's params/message/error
+// when the task sets no_log: true.
+const NoLogPlaceholder = "(output hidden by no_log)"
+
+// sensitiveKeyPattern matches parameter keys whose values are likely secrets
+// and must never be printed, regardless of no_log.
+var sensitiveKeyPattern = regexp.MustCompile(`(?i)pass|secret|token|key|credential`)
+
+// isSensitiveKey reports whether a parameter key likely holds a secret.
+func isSensitiveKey(key string) bool {
+	return sensitiveKeyPattern.MatchString(key)
+}
+
+// formatTaskParams returns display lines for key parameters of a task, based on
+// module type. Values under secret-looking keys are always redacted; when noLog
+// is set the whole parameter set is suppressed.
+func formatTaskParams(module string, params map[string]any, noLog bool) []string {
+	if noLog {
+		return []string{NoLogPlaceholder}
+	}
 	if len(params) == 0 {
 		return nil
 	}
@@ -938,7 +965,7 @@ func formatTaskParams(module string, params map[string]any) []string {
 	if keys, ok := moduleKeys[module]; ok {
 		for _, k := range keys {
 			if v, exists := params[k]; exists {
-				lines = append(lines, fmt.Sprintf("%s: %s", k, truncateParamValue(v)))
+				lines = append(lines, fmt.Sprintf("%s: %s", k, displayParamValue(k, v)))
 			}
 		}
 	} else {
@@ -951,11 +978,40 @@ func formatTaskParams(module string, params map[string]any) []string {
 		}
 		sort.Strings(paramKeys)
 		for _, k := range paramKeys {
-			lines = append(lines, fmt.Sprintf("%s: %s", k, truncateParamValue(params[k])))
+			lines = append(lines, fmt.Sprintf("%s: %s", k, displayParamValue(k, params[k])))
 		}
 	}
 
 	return lines
+}
+
+// displayParamValue formats a parameter value for display, redacting secrets.
+func displayParamValue(key string, v any) string {
+	if isSensitiveKey(key) {
+		return redactedPlaceholder
+	}
+	return truncateParamValue(v)
+}
+
+// sanitizeParams returns a copy of params safe to serialize (e.g. into JSON):
+// nil when noLog is set, otherwise with internal keys dropped and secret-looking
+// keys redacted.
+func sanitizeParams(params map[string]any, noLog bool) map[string]any {
+	if noLog || len(params) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(params))
+	for k, v := range params {
+		if strings.HasPrefix(k, "_") {
+			continue
+		}
+		if isSensitiveKey(k) {
+			out[k] = redactedPlaceholder
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // truncateParamValue formats a parameter value for display, truncating long strings.

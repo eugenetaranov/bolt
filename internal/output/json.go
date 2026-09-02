@@ -179,8 +179,11 @@ func (j *JSONEmitter) planTaskEvent(t PlannedTask) map[string]any {
 	if t.Host != "" {
 		event["host"] = t.Host
 	}
-	if len(t.Params) > 0 {
-		event["params"] = t.Params
+	if t.NoLog {
+		event["no_log"] = true
+	}
+	if params := sanitizeParams(t.Params, t.NoLog); len(params) > 0 {
+		event["params"] = params
 	}
 	if t.Reason != "" {
 		event["reason"] = t.Reason
@@ -194,7 +197,8 @@ func (j *JSONEmitter) planTaskEvent(t PlannedTask) map[string]any {
 	if t.NewChecksum != "" {
 		event["new_checksum"] = t.NewChecksum
 	}
-	if j.diff {
+	// Content diffs are omitted for no_log tasks so secrets never reach output.
+	if j.diff && !t.NoLog {
 		if t.OldContent != "" {
 			event["old_content"] = t.OldContent
 		}

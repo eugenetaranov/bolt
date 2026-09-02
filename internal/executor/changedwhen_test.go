@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/tackhq/tack/internal/connector"
@@ -17,11 +18,12 @@ import (
 type cwConn struct {
 	exitCode int
 	stdout   string
+	stderr   string
 }
 
 func (c *cwConn) Connect(context.Context) error { return nil }
 func (c *cwConn) Execute(_ context.Context, _ string) (*connector.Result, error) {
-	return &connector.Result{Stdout: c.stdout, ExitCode: c.exitCode}, nil
+	return &connector.Result{Stdout: c.stdout, Stderr: c.stderr, ExitCode: c.exitCode}, nil
 }
 func (c *cwConn) Upload(context.Context, io.Reader, string, uint32) error { return nil }
 func (c *cwConn) Download(context.Context, string, io.Writer) error       { return nil }
@@ -104,6 +106,27 @@ func TestFailedWhenFalse_IgnoresNonZeroExit(t *testing.T) {
 	}
 	if reg["exit_code"] != 2 {
 		t.Errorf("expected captured exit_code=2, got %v", reg["exit_code"])
+	}
+}
+
+// no_log must keep a failing task's secret-bearing error out of the output.
+func TestNoLog_RedactsFailureMessage(t *testing.T) {
+	exec := New()
+	pctx, buf := cwPctx(&cwConn{exitCode: 1, stderr: "auth failed for token=SUPERSECRET"})
+	task := &playbook.Task{
+		Module: "command",
+		Params: map[string]any{"cmd": "deploy --token=SUPERSECRET"},
+		NoLog:  true,
+	}
+	_, err := exec.runSingleTask(context.Background(), pctx, task, nil)
+	if err == nil {
+		t.Fatal("expected the command failure to propagate")
+	}
+	if strings.Contains(buf.String(), "SUPERSECRET") {
+		t.Errorf("secret leaked into output despite no_log:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), output.NoLogPlaceholder) {
+		t.Errorf("expected no_log placeholder in output, got:\n%s", buf.String())
 	}
 }
 

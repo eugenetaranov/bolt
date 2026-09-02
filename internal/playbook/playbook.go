@@ -188,6 +188,11 @@ type Task struct {
 	// Failed controls when the task reports as failed.
 	FailedWhen string `yaml:"failed_when"`
 
+	// NoLog suppresses this task's parameters, result message, and diffs from
+	// plan and apply output (text and JSON), so secrets interpolated into the
+	// task never reach logs or CI output.
+	NoLog bool `yaml:"no_log"`
+
 	// Tags are labels used for selective task execution via --tags/--skip-tags.
 	Tags []string `yaml:"-"`
 
