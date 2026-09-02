@@ -31,8 +31,8 @@ security audits, air-gapped environments, and debugging.
 Examples:
   tack export --host web01
   tack export setup.yaml --host web01
-  tack export setup.yaml --host web01 --output /tmp/web01.sh
-  tack export setup.yaml --all-hosts --output /tmp/scripts/
+  tack export setup.yaml --host web01 --out-file /tmp/web01.sh
+  tack export setup.yaml --all-hosts --out-file /tmp/scripts/
   tack export setup.yaml --host web01 --no-facts
   tack export setup.yaml --host web01 --check-only
   tack export setup.yaml --host web01 -e app_version=2.0
@@ -44,7 +44,7 @@ Examples:
 func init() {
 	exportCmd.Flags().String("host", "", "Target a single host")
 	exportCmd.Flags().Bool("all-hosts", false, "Emit one script per host in inventory")
-	exportCmd.Flags().StringP("output", "o", "", "Output path (file for --host, directory for --all-hosts)")
+	exportCmd.Flags().StringP("out-file", "o", "", "Output path (file for --host, directory for --all-hosts)")
 	exportCmd.Flags().Bool("no-facts", false, "Skip fact gathering; leave fact references as sentinels")
 	exportCmd.Flags().Bool("check-only", false, "Validate and list unsupported constructs without writing files")
 	exportCmd.Flags().Bool("no-banner-timestamp", false, "Omit timestamp from banner for reproducible output")
@@ -58,7 +58,7 @@ func init() {
 func runExport(cmd *cobra.Command, args []string) error {
 	host, _ := cmd.Flags().GetString("host")
 	allHosts, _ := cmd.Flags().GetBool("all-hosts")
-	output, _ := cmd.Flags().GetString("output")
+	output, _ := cmd.Flags().GetString("out-file")
 	noFacts, _ := cmd.Flags().GetBool("no-facts")
 	checkOnly, _ := cmd.Flags().GetBool("check-only")
 	noBannerTimestamp, _ := cmd.Flags().GetBool("no-banner-timestamp")
@@ -71,7 +71,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--host and --all-hosts are mutually exclusive")
 	}
 	if allHosts && output == "" {
-		return fmt.Errorf("--all-hosts requires --output directory")
+		return fmt.Errorf("--all-hosts requires --out-file directory")
 	}
 
 	// Parse extra vars

@@ -145,7 +145,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&dryRun, "dry-run", "n", false, "Show what would be done without making changes")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "check", false, "Alias for --dry-run")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output and live spinners (also honors NO_COLOR and CLICOLOR=0)")
-	rootCmd.PersistentFlags().StringVar(&outputMode, "output", "text", "Output format: text or json")
 
 	// Add subcommands
 	rootCmd.AddCommand(runCmd)
@@ -297,6 +296,7 @@ func init() {
 	runCmd.Flags().Bool("no-facts", false, "Skip gathering system facts; speeds up runs that don't depend on facts")
 	runCmd.Flags().Bool("no-plan", false, "Skip the plan preview and approval; apply immediately (ignored with --check/--dry-run)")
 	runCmd.Flags().IntP("forks", "f", 1, "Number of hosts to execute concurrently")
+	runCmd.Flags().StringVar(&outputMode, "output", "text", "Output format: text or json")
 
 	// Inventory flags
 	runCmd.Flags().Int("inventory-timeout", 30, "Timeout in seconds for dynamic inventory plugins")
@@ -806,7 +806,7 @@ func init() {
 	generateCmd.Flags().StringSlice("files", nil, "Files/directories to capture (comma-separated)")
 	generateCmd.Flags().StringSlice("services", nil, "Systemd services to capture (comma-separated)")
 	generateCmd.Flags().StringSlice("users", nil, "Users to capture (comma-separated)")
-	generateCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
+	generateCmd.Flags().StringP("out-file", "o", "", "Output file (default: stdout)")
 
 	// Connection flags (same as run command)
 	addConnectionFlags(generateCmd)
@@ -817,7 +817,7 @@ func runGenerate(cmd *cobra.Command, _ []string) error {
 	files, _ := cmd.Flags().GetStringSlice("files")
 	services, _ := cmd.Flags().GetStringSlice("services")
 	users, _ := cmd.Flags().GetStringSlice("users")
-	output, _ := cmd.Flags().GetString("output")
+	output, _ := cmd.Flags().GetString("out-file")
 
 	if len(packages) == 0 && len(files) == 0 && len(services) == 0 && len(users) == 0 {
 		return fmt.Errorf("at least one resource flag is required (--packages, --files, --services, --users)")
