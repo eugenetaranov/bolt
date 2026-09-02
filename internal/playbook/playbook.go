@@ -48,6 +48,10 @@ type SSHConfig struct {
 	// HostKeyChecking controls whether the host key is verified.
 	// nil means use the default (true / strict). Set to false to disable.
 	HostKeyChecking *bool `yaml:"host_key_checking" json:"host_key_checking,omitempty"`
+
+	// ProxyJump routes the connection through a jump host (bastion), in the
+	// OpenSSH "[user@]host[:port]" form. Overrides any ~/.ssh/config ProxyJump.
+	ProxyJump string `yaml:"proxy_jump" json:"proxy_jump,omitempty"`
 }
 
 // SSMConfig holds AWS Systems Manager connection parameters for a play.

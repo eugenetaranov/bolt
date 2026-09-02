@@ -2407,6 +2407,9 @@ func (e *Executor) GetConnector(play *playbook.Play, host string) (connector.Con
 		if effectiveSSH.HostKeyChecking != nil && !*effectiveSSH.HostKeyChecking {
 			sshOpts = append(sshOpts, sshconn.WithInsecureHostKey())
 		}
+		if effectiveSSH.ProxyJump != "" {
+			sshOpts = append(sshOpts, sshconn.WithProxyJump(effectiveSSH.ProxyJump))
+		}
 		return sshconn.New(sshHost, sshOpts...), nil
 
 	case "ssm":
@@ -2595,6 +2598,9 @@ func mergeSSHConfig(playCfg *playbook.SSHConfig, inv *inventory.Inventory, host 
 		}
 		if src.HostKeyChecking != nil {
 			result.HostKeyChecking = src.HostKeyChecking
+		}
+		if src.ProxyJump != "" {
+			result.ProxyJump = src.ProxyJump
 		}
 	}
 

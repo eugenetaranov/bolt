@@ -62,6 +62,20 @@ type Connector struct {
 	client       *ssh.Client
 	sftpClient   *sftp.Client
 	authWarnings []string
+
+	// bastionCfg, when set, routes the connection through a jump host
+	// (ProxyJump). bastion is the established jump-host connection.
+	bastionCfg *BastionConfig
+	bastion    *Connector
+}
+
+// BastionConfig configures an SSH jump host (bastion) to route through.
+type BastionConfig struct {
+	Host     string
+	User     string
+	Port     int
+	KeyFile  string
+	Password string
 }
 
 // Option configures the SSH connector.
@@ -78,6 +92,24 @@ func WithUser(user string) Option {
 func WithPort(port int) Option {
 	return func(c *Connector) {
 		c.port = port
+	}
+}
+
+// WithBastion routes the connection through a jump host (bastion). It takes
+// precedence over any ProxyJump directive in ~/.ssh/config.
+func WithBastion(b BastionConfig) Option {
+	return func(c *Connector) {
+		c.bastionCfg = &b
+	}
+}
+
+// WithProxyJump routes the connection through the jump host described by an
+// OpenSSH ProxyJump spec ("[user@]host[:port]"). Empty spec is a no-op.
+func WithProxyJump(spec string) Option {
+	return func(c *Connector) {
+		if b := parseProxyJump(spec); b != nil {
+			c.bastionCfg = b
+		}
 	}
 }
 
@@ -193,9 +225,8 @@ func (c *Connector) Connect(ctx context.Context) error {
 		}
 	}
 
-	// Dial with context support
-	dialer := net.Dialer{Timeout: c.timeout}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	// Dial the target, optionally through a bastion/jump host.
+	conn, err := c.dialTarget(ctx, addr)
 	if err != nil {
 		return fmt.Errorf("failed to dial %s: %w", addr, err)
 	}
@@ -221,6 +252,93 @@ func (c *Connector) Connect(ctx context.Context) error {
 
 	c.client = ssh.NewClient(sshConn, chans, reqs)
 	return nil
+}
+
+// dialTarget opens a TCP connection to the target address, routing through the
+// bastion/jump host when one is configured.
+func (c *Connector) dialTarget(ctx context.Context, addr string) (net.Conn, error) {
+	if c.bastionCfg == nil {
+		dialer := net.Dialer{Timeout: c.timeout}
+		return dialer.DialContext(ctx, "tcp", addr)
+	}
+	if err := c.connectBastion(ctx); err != nil {
+		return nil, fmt.Errorf("bastion %s: %w", c.bastionCfg.Host, err)
+	}
+	// Dial the target from the jump host. ssh.Client.Dial has no context, but
+	// the overall operation is bounded by the connector timeout.
+	conn, err := c.bastion.client.Dial("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("dial %s via bastion %s: %w", addr, c.bastionCfg.Host, err)
+	}
+	return conn, nil
+}
+
+// connectBastion establishes the jump-host connection, reusing this
+// connector's auth (key/password) and security settings as fallbacks. The
+// bastion resolves its own ssh_config (HostName/User/Port/IdentityFile).
+func (c *Connector) connectBastion(ctx context.Context) error {
+	if c.bastion != nil {
+		return nil
+	}
+	b := c.bastionCfg
+	opts := []Option{WithTimeout(c.timeout)}
+	if b.User != "" {
+		opts = append(opts, WithUser(b.User))
+	}
+	if b.Port != 0 {
+		opts = append(opts, WithPort(b.Port))
+	}
+	if b.KeyFile != "" {
+		opts = append(opts, WithKeyFile(b.KeyFile))
+	} else if c.keyFile != "" {
+		opts = append(opts, WithKeyFile(c.keyFile))
+	}
+	if b.Password != "" {
+		opts = append(opts, WithPassword(b.Password))
+	} else if c.password != "" {
+		opts = append(opts, WithPassword(c.password))
+	}
+	if c.insecureHostKey {
+		opts = append(opts, WithInsecureHostKey())
+	}
+
+	bc := New(b.Host, opts...)
+	if err := bc.Connect(ctx); err != nil {
+		return err
+	}
+	c.bastion = bc
+	return nil
+}
+
+// parseProxyJump parses an OpenSSH ProxyJump value ("[user@]host[:port]",
+// possibly a comma-separated chain — only the first hop is used) into a
+// BastionConfig. Returns nil for empty or "none".
+func parseProxyJump(spec string) *BastionConfig {
+	spec = strings.TrimSpace(spec)
+	if spec == "" || spec == "none" {
+		return nil
+	}
+	// Only the first hop of a multi-hop chain is supported.
+	if i := strings.IndexByte(spec, ','); i >= 0 {
+		spec = strings.TrimSpace(spec[:i])
+	}
+	cfg := &BastionConfig{}
+	if at := strings.LastIndexByte(spec, '@'); at >= 0 {
+		cfg.User = spec[:at]
+		spec = spec[at+1:]
+	}
+	if h, p, err := net.SplitHostPort(spec); err == nil {
+		cfg.Host = h
+		if port, perr := strconv.Atoi(p); perr == nil {
+			cfg.Port = port
+		}
+	} else {
+		cfg.Host = spec
+	}
+	if cfg.Host == "" {
+		return nil
+	}
+	return cfg
 }
 
 // Execute runs a command on the remote host and returns the result.
@@ -392,6 +510,11 @@ func (c *Connector) Close() error {
 		}
 		c.client = nil
 	}
+	// Tear down the jump-host connection after the target's.
+	if c.bastion != nil {
+		_ = c.bastion.Close()
+		c.bastion = nil
+	}
 	return sftpErr
 }
 
@@ -464,6 +587,13 @@ func (c *Connector) resolveSSHConfig() {
 		identityFile, _ := cfg.Get(c.host, "IdentityFile")
 		if identityFile != "" {
 			c.keyFile = expandPath(identityFile)
+		}
+	}
+
+	// Resolve ProxyJump (jump host) when not set explicitly via WithBastion.
+	if c.bastionCfg == nil {
+		if pj, _ := cfg.Get(c.host, "ProxyJump"); pj != "" {
+			c.bastionCfg = parseProxyJump(pj)
 		}
 	}
 
