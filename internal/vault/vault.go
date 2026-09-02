@@ -28,6 +28,14 @@ const (
 	argon2Time    = 3
 	argon2Memory  = 65536 // KiB = 64 MB
 	argon2Threads = 4
+
+	// Upper bounds on KDF parameters read from a (possibly hostile) vault
+	// header. Without these, a tampered header — e.g. m=4294967295 — would make
+	// argon2.IDKey attempt a multi-terabyte allocation and OOM the process,
+	// turning a shared/committed vault into a denial-of-service vector.
+	argon2MaxTime    = 10
+	argon2MaxMemory  = 1 << 20 // 1 GiB expressed in KiB
+	argon2MaxThreads = 8
 )
 
 // vaultParams holds the KDF parameters extracted from a vault file header.
@@ -183,6 +191,18 @@ func parseHeader(line string) (vaultParams, error) {
 	n, err := fmt.Sscanf(paramStr, "t=%d,m=%d,p=%d", &t, &m, &p)
 	if err != nil || n != 3 {
 		return vaultParams{}, fmt.Errorf("vault: malformed header: cannot parse KDF params from %q", paramStr)
+	}
+
+	// Bound-check before the KDF runs so a hostile header cannot trigger a
+	// resource-exhaustion (OOM) decryption. argon2 also requires m >= 8*p.
+	if t < 1 || t > argon2MaxTime {
+		return vaultParams{}, fmt.Errorf("vault: KDF time parameter t=%d out of range [1,%d]", t, argon2MaxTime)
+	}
+	if p < 1 || p > argon2MaxThreads {
+		return vaultParams{}, fmt.Errorf("vault: KDF parallelism p=%d out of range [1,%d]", p, argon2MaxThreads)
+	}
+	if minMem := 8 * uint32(p); m < minMem || m > argon2MaxMemory {
+		return vaultParams{}, fmt.Errorf("vault: KDF memory m=%d KiB out of range [%d,%d]", m, minMem, argon2MaxMemory)
 	}
 
 	return vaultParams{

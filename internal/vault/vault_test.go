@@ -98,6 +98,25 @@ func TestDecrypt_MalformedHeaderMissingKDFParams(t *testing.T) {
 	assert.Contains(t, err.Error(), "vault:", "error must have vault: prefix")
 }
 
+// A hostile vault header with out-of-range KDF params must be rejected before
+// argon2.IDKey runs, so a tampered m/t/p can't OOM the process.
+func TestDecrypt_RejectsOutOfRangeKDFParams(t *testing.T) {
+	cases := map[string]string{
+		"huge memory":  "$TACK_VAULT;1.0;AES256-GCM;t=3,m=4294967295,p=4\nYWJj\n",
+		"zero time":    "$TACK_VAULT;1.0;AES256-GCM;t=0,m=65536,p=4\nYWJj\n",
+		"huge time":    "$TACK_VAULT;1.0;AES256-GCM;t=999,m=65536,p=4\nYWJj\n",
+		"zero threads": "$TACK_VAULT;1.0;AES256-GCM;t=3,m=65536,p=0\nYWJj\n",
+		"tiny memory":  "$TACK_VAULT;1.0;AES256-GCM;t=3,m=1,p=4\nYWJj\n",
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Decrypt([]byte(data), []byte("password"))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "out of range")
+		})
+	}
+}
+
 func TestEncrypt_DifferentCiphertextsForSameInput(t *testing.T) {
 	plaintext := []byte("same-plaintext: value\n")
 	password := []byte("same-password")

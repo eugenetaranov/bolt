@@ -277,6 +277,8 @@ func TestExecute_ContextCancelled(t *testing.T) {
 }
 
 func TestExecute_WithSudo(t *testing.T) {
+	// Embedding the sudo password requires an explicit opt-in.
+	t.Setenv("TACK_SSM_ALLOW_SUDO_PASSWORD", "1")
 	var capturedCmd string
 	mock := &mockSSM{
 		sendCommandFn: func(_ context.Context, params *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
@@ -293,6 +295,23 @@ func TestExecute_WithSudo(t *testing.T) {
 	// than on the sudo command line — it must not sit before the pipe/argv.
 	assert.Contains(t, capturedCmd, "sudo -S -p '' sh -c 'apt update'")
 	assert.Contains(t, capturedCmd, "<<'TACK_SUDO_PW'\nsecret\nTACK_SUDO_PW")
+}
+
+// Without the opt-in, Execute must fail rather than send the password to SSM.
+func TestExecute_WithSudoPassword_RefusedByDefault(t *testing.T) {
+	t.Setenv("TACK_SSM_ALLOW_SUDO_PASSWORD", "")
+	sent := false
+	mock := &mockSSM{
+		sendCommandFn: func(_ context.Context, _ *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+			sent = true
+			return &ssm.SendCommandOutput{Command: &ssmtypes.Command{CommandId: aws.String("cmd-123")}}, nil
+		},
+	}
+	c := New("i-test123", withSSMClient(mock), WithSudo(), WithSudoPassword("secret"))
+
+	_, err := c.Execute(context.Background(), "apt update")
+	require.Error(t, err)
+	assert.False(t, sent, "no command should be sent to SSM when the password is refused")
 }
 
 func TestUploadBase64(t *testing.T) {
@@ -605,15 +624,36 @@ func TestBuildCommand(t *testing.T) {
 	}{
 		{"no sudo", false, "", "ls", "ls"},
 		{"sudo no pass", true, "", "ls", "sudo sh -c 'ls'"},
-		{"sudo with pass", true, "secret", "ls", "sudo -S -p '' sh -c 'ls' <<'TACK_SUDO_PW'\nsecret\nTACK_SUDO_PW"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &Connector{sudo: tt.sudo, sudoPassword: tt.sudoPass}
-			assert.Equal(t, tt.want, c.buildCommand(tt.cmd))
+			got, err := c.buildCommand(tt.cmd)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// A sudo password must never be embedded in the SSM command document by
+// default, since AWS records it in Run Command history and CloudTrail.
+func TestBuildCommand_SudoPasswordRefusedByDefault(t *testing.T) {
+	t.Setenv("TACK_SSM_ALLOW_SUDO_PASSWORD", "")
+	c := &Connector{sudo: true, sudoPassword: "secret"}
+	_, err := c.buildCommand("ls")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CloudTrail")
+	assert.NotContains(t, err.Error(), "secret")
+}
+
+// With an explicit opt-in the password is embedded (unchanged legacy behavior).
+func TestBuildCommand_SudoPasswordOptIn(t *testing.T) {
+	t.Setenv("TACK_SSM_ALLOW_SUDO_PASSWORD", "1")
+	c := &Connector{sudo: true, sudoPassword: "secret"}
+	got, err := c.buildCommand("ls")
+	require.NoError(t, err)
+	assert.Equal(t, "sudo -S -p '' sh -c 'ls' <<'TACK_SUDO_PW'\nsecret\nTACK_SUDO_PW", got)
 }
 
 func TestShellQuote(t *testing.T) {

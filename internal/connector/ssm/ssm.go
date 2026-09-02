@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -224,7 +225,10 @@ func (c *Connector) Connect(ctx context.Context) error {
 
 // Execute runs a command on the instance via SSM SendCommand and polls for the result.
 func (c *Connector) Execute(ctx context.Context, cmd string) (*connector.Result, error) {
-	fullCmd := c.buildCommand(cmd)
+	fullCmd, err := c.buildCommand(cmd)
+	if err != nil {
+		return nil, err
+	}
 
 	timeoutSec := int(c.timeout.Seconds())
 	if timeoutSec < 1 {
@@ -469,19 +473,35 @@ func (c *Connector) String() string {
 
 // buildCommand wraps the command with sudo if configured.
 //
-// AWS-RunShellScript has no stdin channel, so when sudo needs a password we
-// feed it via a quoted heredoc appended to the command. This keeps the password
-// out of the instance's process argv (/proc/<pid>/cmdline) — it lives only in
-// the SSM-agent's temporary script on disk. NOTE: SSM Run Command history and
-// CloudTrail still record the full command text, so a passwordless-sudo
-// (NOPASSWD) role remains the recommended setup for SSM targets.
-func (c *Connector) buildCommand(cmd string) string {
+// AWS-RunShellScript has no stdin channel, so the only way to give sudo a
+// password is to embed it in the command text — which AWS records verbatim in
+// SSM Run Command history and CloudTrail, where it persists and is readable by
+// anyone with ssm:GetCommandInvocation / CloudTrail access. We therefore refuse
+// to send a sudo password over SSM by default: passwordless sudo (NOPASSWD) is
+// the supported setup for SSM targets. Setting TACK_SSM_ALLOW_SUDO_PASSWORD
+// overrides this for accounts that accept the exposure.
+func (c *Connector) buildCommand(cmd string) (string, error) {
 	wrapped, stdin := connector.SudoWrap(cmd, c.sudo, c.sudoPassword, false)
 	if stdin == nil {
-		return wrapped
+		return wrapped, nil
+	}
+	if !sudoPasswordOverSSMAllowed() {
+		return "", fmt.Errorf("refusing to send the sudo password over SSM: it would be recorded in SSM Run Command history and CloudTrail. " +
+			"Configure passwordless sudo (NOPASSWD) for SSM targets, or set TACK_SSM_ALLOW_SUDO_PASSWORD=1 to override (not recommended)")
 	}
 	// stdin already carries the trailing newline; the heredoc adds its own.
-	return fmt.Sprintf("%s <<'TACK_SUDO_PW'\n%sTACK_SUDO_PW", wrapped, stdin)
+	return fmt.Sprintf("%s <<'TACK_SUDO_PW'\n%sTACK_SUDO_PW", wrapped, stdin), nil
+}
+
+// sudoPasswordOverSSMAllowed reports whether the operator has explicitly
+// opted in to embedding the sudo password in SSM command documents.
+func sudoPasswordOverSSMAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("TACK_SSM_ALLOW_SUDO_PASSWORD"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 // cleanupS3 removes a temporary S3 object (best-effort).

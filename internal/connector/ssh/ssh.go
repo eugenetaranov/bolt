@@ -172,18 +172,22 @@ func (c *Connector) Connect(ctx context.Context) error {
 	} else {
 		cb, algos, err := knownHostsConfig(addr)
 		if err != nil {
-			// Fall back to insecure if known_hosts is unavailable.
-			fmt.Fprintf(os.Stderr, "WARNING: could not parse known_hosts (%v); SSH host key verification is disabled\n", err)
-			config.HostKeyCallback = ssh.InsecureIgnoreHostKey()
-		} else {
-			config.HostKeyCallback = cb
-			// Restrict host-key negotiation to the algorithms actually pinned
-			// for this host, matching OpenSSH. Without this the server may
-			// present a key type absent from known_hosts (x/crypto's default
-			// order deprioritizes ed25519), causing a spurious "key mismatch".
-			if len(algos) > 0 {
-				config.HostKeyAlgorithms = algos
-			}
+			// Fail closed: never silently disable host-key verification. A
+			// missing or unparseable known_hosts is treated as "cannot verify",
+			// exactly as OpenSSH's StrictHostKeyChecking=yes would.
+			return fmt.Errorf("cannot verify SSH host key for %s: %w\n"+
+				"  tack refuses to connect without host-key verification.\n"+
+				"  pin the host first: ssh-keyscan -H %s >> ~/.ssh/known_hosts\n"+
+				"  or, only if you accept the MITM risk, connect with --insecure (TACK_SSH_INSECURE=1)",
+				addr, err, c.hostname)
+		}
+		config.HostKeyCallback = cb
+		// Restrict host-key negotiation to the algorithms actually pinned
+		// for this host, matching OpenSSH. Without this the server may
+		// present a key type absent from known_hosts (x/crypto's default
+		// order deprioritizes ed25519), causing a spurious "key mismatch".
+		if len(algos) > 0 {
+			config.HostKeyAlgorithms = algos
 		}
 	}
 
