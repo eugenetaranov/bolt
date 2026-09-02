@@ -4,6 +4,7 @@ package facts
 import (
 	"context"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/tackhq/tack/internal/connector"
@@ -72,6 +73,53 @@ else
   _all6=$(ip -6 addr show scope global 2>/dev/null | awk '/inet6 /{split($2,a,"/"); printf sep a[1]; sep=","}')
   [ -n "$_all6" ] && echo "TACK_FACT all_ipv6=$_all6"
 fi
+# CPU count
+_ncpu=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null)
+[ -n "$_ncpu" ] && echo "TACK_FACT processor_count=$_ncpu"
+# Memory (MB)
+if [ -r /proc/meminfo ]; then
+  _mt=$(awk '/^MemTotal:/{printf "%d", $2/1024}' /proc/meminfo)
+  _mf=$(awk '/^MemAvailable:/{printf "%d", $2/1024}' /proc/meminfo)
+  [ -n "$_mt" ] && echo "TACK_FACT memory_total_mb=$_mt"
+  [ -n "$_mf" ] && echo "TACK_FACT memory_free_mb=$_mf"
+elif [ "$(uname -s)" = "Darwin" ]; then
+  _mt=$(sysctl -n hw.memsize 2>/dev/null)
+  [ -n "$_mt" ] && echo "TACK_FACT memory_total_mb=$((_mt/1024/1024))"
+fi
+# Root filesystem (MB)
+_df=$(df -Pm / 2>/dev/null | awk 'NR==2{print $2","$4}')
+if [ -n "$_df" ]; then
+  echo "TACK_FACT root_total_mb=${_df%,*}"
+  echo "TACK_FACT root_free_mb=${_df#*,}"
+fi
+# Service manager
+if [ -d /run/systemd/system ]; then echo "TACK_FACT service_manager=systemd"
+elif [ "$(uname -s)" = "Darwin" ]; then echo "TACK_FACT service_manager=launchd"
+elif command -v rc-service >/dev/null 2>&1; then echo "TACK_FACT service_manager=openrc"
+elif [ -x /sbin/init ]; then echo "TACK_FACT service_manager=sysvinit"
+fi
+# Virtualization / container detection
+_virt=""
+if command -v systemd-detect-virt >/dev/null 2>&1; then
+  _virt=$(systemd-detect-virt 2>/dev/null)
+fi
+if [ -z "$_virt" ] || [ "$_virt" = "none" ]; then
+  if [ -f /.dockerenv ] || grep -qa 'docker\|containerd' /proc/1/cgroup 2>/dev/null; then _virt=docker
+  elif grep -qa lxc /proc/1/cgroup 2>/dev/null; then _virt=lxc
+  elif grep -qai microsoft /proc/version 2>/dev/null; then _virt=wsl
+  fi
+fi
+[ -n "$_virt" ] && [ "$_virt" != "none" ] && echo "TACK_FACT virtualization_type=$_virt"
+case "$_virt" in docker|lxc|podman|openvz|container-other) echo "TACK_FACT is_container=true";; esac
+# SELinux
+if command -v getenforce >/dev/null 2>&1; then
+  echo "TACK_FACT selinux=$(getenforce 2>/dev/null | tr 'A-Z' 'a-z')"
+fi
+# Timezone
+_tz=$(timedatectl show -p Timezone --value 2>/dev/null)
+[ -z "$_tz" ] && _tz=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+[ -z "$_tz" ] && _tz=$(date +%Z 2>/dev/null)
+[ -n "$_tz" ] && echo "TACK_FACT timezone=$_tz"
 # EC2 detection via IMDSv2
 TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" \
   -H "X-aws-ec2-metadata-token-ttl-seconds: 10" --connect-timeout 1 2>/dev/null)
@@ -104,6 +152,7 @@ func Gather(ctx context.Context, conn connector.Connector) (map[string]any, erro
 	// Basic facts from Go runtime (for local)
 	facts["go_os"] = runtime.GOOS
 	facts["go_arch"] = runtime.GOARCH
+	facts["is_container"] = false // overridden below if a container is detected
 
 	result, err := conn.Execute(ctx, factsScript)
 	if err != nil {
@@ -197,6 +246,16 @@ func Gather(ctx context.Context, conn connector.Connector) (map[string]any, erro
 			if value != "" {
 				facts[key] = value
 			}
+		case "processor_count", "memory_total_mb", "memory_free_mb", "root_total_mb", "root_free_mb":
+			if n, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+				facts[key] = n
+			}
+		case "virtualization_type", "service_manager", "selinux", "timezone":
+			if value != "" {
+				facts[key] = value
+			}
+		case "is_container":
+			facts["is_container"] = value == "true"
 		default:
 			if strings.HasPrefix(key, "env_") {
 				envName := strings.TrimPrefix(key, "env_")

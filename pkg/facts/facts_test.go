@@ -444,3 +444,56 @@ func TestGather_GoRuntimeFacts(t *testing.T) {
 		t.Error("go_arch should always be set")
 	}
 }
+
+func TestGather_SystemFacts(t *testing.T) {
+	output := strings.Join([]string{
+		"TACK_FACT os_type=Linux",
+		"TACK_FACT processor_count=8",
+		"TACK_FACT memory_total_mb=16000",
+		"TACK_FACT memory_free_mb=9000",
+		"TACK_FACT root_total_mb=50000",
+		"TACK_FACT root_free_mb=42000",
+		"TACK_FACT service_manager=systemd",
+		"TACK_FACT virtualization_type=docker",
+		"TACK_FACT is_container=true",
+		"TACK_FACT selinux=enforcing",
+		"TACK_FACT timezone=UTC",
+	}, "\n")
+
+	facts, err := Gather(context.Background(), &mockConnector{stdout: output})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	if facts["processor_count"] != 8 {
+		t.Errorf("processor_count = %v, want 8", facts["processor_count"])
+	}
+	if facts["memory_total_mb"] != 16000 {
+		t.Errorf("memory_total_mb = %v, want 16000", facts["memory_total_mb"])
+	}
+	if facts["service_manager"] != "systemd" {
+		t.Errorf("service_manager = %v", facts["service_manager"])
+	}
+	if facts["virtualization_type"] != "docker" {
+		t.Errorf("virtualization_type = %v", facts["virtualization_type"])
+	}
+	if facts["is_container"] != true {
+		t.Errorf("is_container = %v, want true", facts["is_container"])
+	}
+	if facts["selinux"] != "enforcing" {
+		t.Errorf("selinux = %v", facts["selinux"])
+	}
+	if facts["timezone"] != "UTC" {
+		t.Errorf("timezone = %v", facts["timezone"])
+	}
+}
+
+func TestGather_IsContainerDefaultsFalse(t *testing.T) {
+	facts, err := Gather(context.Background(), &mockConnector{stdout: "TACK_FACT os_type=Linux"})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if facts["is_container"] != false {
+		t.Errorf("is_container should default to false, got %v", facts["is_container"])
+	}
+}
