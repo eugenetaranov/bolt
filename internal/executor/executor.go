@@ -622,6 +622,12 @@ func (e *Executor) runMultiHostPlay(ctx context.Context, play *playbook.Play, st
 	// --- Apply phase ---
 	hosts := play.Hosts
 
+	// Rolling batches / failure budget take a dedicated path; everything else
+	// uses the original single-batch apply with unchanged semantics.
+	if !play.Serial.IsEmpty() || play.MaxFailPercentage != 0 || play.AnyErrorsFatal {
+		return e.applyHostsBatched(ctx, play, hosts, preps, stats, forks)
+	}
+
 	if forks <= 1 {
 		// Serial apply.
 		for _, host := range hosts {
@@ -727,6 +733,144 @@ func (e *Executor) runMultiHostPlay(ctx context.Context, play *playbook.Play, st
 	}
 
 	return nil
+}
+
+// applyHostsBatched applies the play to hosts in rolling batches (play.Serial),
+// evaluating the failure budget (any_errors_fatal / max_fail_percentage) after
+// each batch and aborting the rollout before the next batch if it is exceeded.
+func (e *Executor) applyHostsBatched(ctx context.Context, play *playbook.Play, hosts []string, preps map[string]*hostPrep, stats *Stats, forks int) error {
+	batches := play.Serial.Batches(len(hosts))
+	var allFailed []string
+	start := 0
+	for bi, size := range batches {
+		if start >= len(hosts) {
+			break
+		}
+		end := start + size
+		if end > len(hosts) {
+			end = len(hosts)
+		}
+		batch := hosts[start:end]
+		start = end
+
+		if ctx.Err() != nil {
+			closePrepConnectors(preps)
+			return ctx.Err()
+		}
+
+		if len(batches) > 1 {
+			e.Output.Info("Batch %d/%d: %s", bi+1, len(batches), strings.Join(batch, ", "))
+		}
+
+		failed := e.applyBatch(ctx, play, batch, preps, stats, forks)
+		allFailed = append(allFailed, failed...)
+
+		if batchExceedsBudget(play, len(batch), len(failed)) {
+			closePrepConnectors(preps)
+			return fmt.Errorf("rolling deploy aborted after batch %d/%d: %d of %d host(s) failed (%v), exceeding the failure budget",
+				bi+1, len(batches), len(failed), len(batch), allFailed)
+		}
+	}
+
+	closePrepConnectors(preps)
+	if len(allFailed) > 0 {
+		return fmt.Errorf("%d host(s) failed: %v", len(allFailed), allFailed)
+	}
+	return nil
+}
+
+// applyBatch applies the play to one batch of hosts (serially when forks<=1,
+// else via a worker pool), collecting the names of hosts that failed rather
+// than aborting on the first failure. It closes each host's connector.
+func (e *Executor) applyBatch(ctx context.Context, play *playbook.Play, batch []string, preps map[string]*hostPrep, stats *Stats, forks int) []string {
+	var failed []string
+
+	if forks <= 1 {
+		for _, host := range batch {
+			prep := preps[host]
+			if prep == nil || prep.err != nil || prep.pctx == nil {
+				if prep != nil && prep.err != nil {
+					failed = append(failed, host)
+				}
+				continue
+			}
+			if err := e.applyHostPlan(ctx, prep.pctx, stats, prep.allTasks, prep.allHandlers); err != nil {
+				failed = append(failed, host)
+				e.Output.Error("Host %s failed: %v", host, err)
+			}
+			_ = prep.conn.Close()
+			prep.conn = nil
+		}
+		return failed
+	}
+
+	pool := NewWorkerPool(forks)
+	for _, host := range batch {
+		host := host
+		prep := preps[host]
+		if prep == nil || prep.err != nil {
+			var perr error
+			if prep != nil {
+				perr = prep.err
+			}
+			pool.Submit(ctx, func(ctx context.Context) *HostResult {
+				return &HostResult{Host: host, Success: false, Error: perr, Output: &bytes.Buffer{}}
+			})
+			continue
+		}
+		pool.Submit(ctx, func(ctx context.Context) *HostResult {
+			buf := &bytes.Buffer{}
+			hostOutput := output.New(buf)
+			if textOut, ok := e.Output.(*output.Output); ok {
+				hostOutput.SetColor(textOut.ColorEnabled())
+			}
+			hostOutput.SetDebug(e.Debug)
+			hostOutput.SetVerbose(e.Verbose)
+			hostOutput.SetDiff(e.ShowDiff)
+			prep.pctx.Output = hostOutput
+			hostOutput.HostStart(host, play.GetConnection())
+
+			hostStats := &Stats{}
+			err := e.applyHostPlan(ctx, prep.pctx, hostStats, prep.allTasks, prep.allHandlers)
+			_ = prep.conn.Close()
+			prep.conn = nil
+			return &HostResult{Host: host, Success: err == nil, Error: err, Stats: *hostStats, Output: buf}
+		})
+	}
+
+	results := pool.Wait()
+	FlushBuffers(os.Stdout, batch, results)
+	for _, r := range results {
+		stats.Tasks += r.Stats.Tasks
+		stats.OK += r.Stats.OK
+		stats.Changed += r.Stats.Changed
+		stats.Failed += r.Stats.Failed
+		stats.Skipped += r.Stats.Skipped
+		if !r.Success {
+			failed = append(failed, r.Host)
+			if r.Error != nil {
+				e.Output.Error("Host %s failed: %v", r.Host, r.Error)
+			}
+		}
+	}
+	return failed
+}
+
+// batchExceedsBudget reports whether a batch's failures should abort the
+// rollout. any_errors_fatal aborts on any failure; otherwise the batch aborts
+// when the failed percentage exceeds max_fail_percentage (default 0, so any
+// failure aborts).
+func batchExceedsBudget(play *playbook.Play, batchSize, failedCount int) bool {
+	if failedCount == 0 {
+		return false
+	}
+	if play.AnyErrorsFatal {
+		return true
+	}
+	if batchSize == 0 {
+		return false
+	}
+	return failedCount*100/batchSize > play.MaxFailPercentage
 }
 
 // preparePlayContext builds the per-host PlayContext: merges play/role/

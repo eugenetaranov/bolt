@@ -3,6 +3,7 @@ package playbook
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -283,6 +284,28 @@ func parseRawPlay(raw map[string]any) (*Play, error) {
 	}
 	if v, ok := asBool(raw["sudo"]); ok {
 		play.Sudo = v
+	}
+	if v, ok := raw["become_user"].(string); ok {
+		play.BecomeUser = v
+	}
+	if v, ok := raw["become_method"].(string); ok {
+		play.BecomeMethod = v
+	}
+	switch v := raw["serial"].(type) {
+	case int:
+		play.Serial = SerialSpec{strconv.Itoa(v)}
+	case string:
+		play.Serial = SerialSpec{v}
+	case []any:
+		for _, item := range v {
+			play.Serial = append(play.Serial, fmt.Sprintf("%v", item))
+		}
+	}
+	if v, ok := raw["max_fail_percentage"].(int); ok {
+		play.MaxFailPercentage = v
+	}
+	if v, ok := asBool(raw["any_errors_fatal"]); ok {
+		play.AnyErrorsFatal = v
 	}
 	if v, ok := raw["gather_facts"].(bool); ok {
 		play.GatherFacts = &v
@@ -690,6 +713,9 @@ func parseSSHConfig(raw map[string]any) *SSHConfig {
 	}
 	if v, ok := asBool(raw["host_key_checking"]); ok {
 		cfg.HostKeyChecking = &v
+	}
+	if v, ok := raw["proxy_jump"].(string); ok {
+		cfg.ProxyJump = v
 	}
 	return cfg
 }

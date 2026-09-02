@@ -4,8 +4,62 @@ package playbook
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+// SerialSpec describes rolling-batch sizing for a play. Each token is an
+// absolute count ("2") or a percentage ("25%"). A list ramps the batch sizes;
+// the last token repeats for any remaining hosts.
+type SerialSpec []string
+
+// IsEmpty reports whether no serial batching was configured.
+func (s SerialSpec) IsEmpty() bool { return len(s) == 0 }
+
+// Batches returns the batch sizes for total hosts, summing to total. An empty
+// spec yields a single batch of all hosts.
+func (s SerialSpec) Batches(total int) []int {
+	if total <= 0 {
+		return nil
+	}
+	if len(s) == 0 {
+		return []int{total}
+	}
+	var sizes []int
+	remaining, idx := total, 0
+	for remaining > 0 {
+		n := resolveSerialToken(s[idx], total)
+		if idx < len(s)-1 {
+			idx++
+		}
+		if n <= 0 {
+			n = remaining // malformed token: take the rest
+		}
+		if n > remaining {
+			n = remaining
+		}
+		sizes = append(sizes, n)
+		remaining -= n
+	}
+	return sizes
+}
+
+// resolveSerialToken converts a serial token ("2" or "25%") to a host count.
+func resolveSerialToken(tok string, total int) int {
+	tok = strings.TrimSpace(tok)
+	if strings.HasSuffix(tok, "%") {
+		p, err := strconv.Atoi(strings.TrimSuffix(tok, "%"))
+		if err != nil || p <= 0 {
+			return 0
+		}
+		return (total*p + 99) / 100 // ceil
+	}
+	n, err := strconv.Atoi(tok)
+	if err != nil {
+		return 0
+	}
+	return n
+}
 
 // Playbook represents a complete playbook with one or more plays.
 type Playbook struct {
@@ -124,6 +178,20 @@ type Play struct {
 
 	// SudoPassword is the password for privilege escalation.
 	SudoPassword string `yaml:"sudo_password"`
+
+	// Serial controls rolling-batch apply: hosts are applied in batches of the
+	// given size instead of all at once. Each entry is an absolute count or a
+	// percentage ("25%"); a list ramps batch sizes (e.g. [1, "50%"]). Empty
+	// means all hosts in a single batch.
+	Serial SerialSpec `yaml:"serial"`
+
+	// MaxFailPercentage aborts the rolling deploy before the next batch if the
+	// percentage of failed hosts in a batch exceeds this threshold (0 = any
+	// failure in a batch aborts, matching a strict rollout).
+	MaxFailPercentage int `yaml:"max_fail_percentage"`
+
+	// AnyErrorsFatal aborts the run after a batch in which any host failed.
+	AnyErrorsFatal bool `yaml:"any_errors_fatal"`
 
 	// VarsFiles is a list of YAML file paths whose variables are loaded
 	// and merged into play variables. Paths starting with "?" are optional
