@@ -46,6 +46,8 @@ type Connector struct {
 	timeout         time.Duration
 	sudo            bool
 	sudoPassword    string
+	becomeMethod    string
+	becomeUser      string
 	insecureHostKey bool
 
 	// passwordPrompt, if set, is called lazily to obtain a password for
@@ -608,13 +610,27 @@ func loadKey(path string) (ssh.Signer, error) {
 // buildCommand wraps the command with sudo if configured, returning any stdin
 // bytes (the sudo password) that must be fed to the process.
 func (c *Connector) buildCommand(cmd string) (string, []byte) {
-	return connector.SudoWrap(cmd, c.sudo, c.sudoPassword, c.user == "root")
+	return connector.WrapBecome(cmd, connector.BecomeConfig{
+		Enabled:  c.sudo,
+		Method:   c.becomeMethod,
+		User:     c.becomeUser,
+		Password: c.sudoPassword,
+	}, c.user == "root")
 }
 
 // SetSudo enables or disables sudo for subsequent commands.
 func (c *Connector) SetSudo(enabled bool, password string) {
 	c.sudo = enabled
 	c.sudoPassword = password
+}
+
+// SetBecome configures privilege escalation (method + target user) for
+// subsequent commands. Implements connector.Becomer.
+func (c *Connector) SetBecome(cfg connector.BecomeConfig) {
+	c.sudo = cfg.Enabled
+	c.sudoPassword = cfg.Password
+	c.becomeMethod = cfg.Method
+	c.becomeUser = cfg.User
 }
 
 // getSFTPClient returns a cached SFTP client or creates a new one.

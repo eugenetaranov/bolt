@@ -57,24 +57,93 @@ func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
+// BecomeConfig describes privilege escalation for a command.
+type BecomeConfig struct {
+	// Enabled turns escalation on.
+	Enabled bool
+	// Method is "sudo" (default), "su", or "doas".
+	Method string
+	// User is the target user; empty means root.
+	User string
+	// Password is the escalation password (used only by the sudo method, fed
+	// via stdin). su/doas read the password from a TTY and therefore require
+	// passwordless configuration on the target.
+	Password string
+}
+
+// Becomer is an optional connector capability for configuring privilege
+// escalation with a target user and method. Connectors that only support
+// sudo-to-root can implement just SetSudo; those that implement Becomer also
+// honor become_user / become_method.
+type Becomer interface {
+	SetBecome(cfg BecomeConfig)
+}
+
+// Method constants for BecomeConfig.Method.
+const (
+	BecomeSudo = "sudo"
+	BecomeSu   = "su"
+	BecomeDoas = "doas"
+)
+
 // SudoWrap wraps cmd with sudo when enabled (skipping when already root).
-//
-// When a password is set it uses `sudo -S -p ''` and returns the password
-// (with a trailing newline) as stdin bytes for the caller to feed to the
-// process — keeping the password out of the process argv (/proc/<pid>/cmdline)
-// and off disk. `-p ''` suppresses the "[sudo] password for …" prompt on
-// stderr. The NOPASSWD path (no password) and the root / no-sudo passthrough
-// return nil stdin.
+// It is retained for callers that only need sudo-to-root; it delegates to
+// WrapBecome.
 func SudoWrap(cmd string, sudoEnabled bool, password string, isRoot bool) (wrapped string, stdin []byte) {
-	if !sudoEnabled || isRoot {
+	return WrapBecome(cmd, BecomeConfig{Enabled: sudoEnabled, Password: password}, isRoot)
+}
+
+// WrapBecome wraps cmd for privilege escalation per cfg. It returns the wrapped
+// command and, for the sudo method with a password, the password bytes (with a
+// trailing newline) to feed via stdin — keeping the secret out of argv
+// (/proc/<pid>/cmdline) and off disk.
+//
+// Escalation is skipped when disabled, or when the connection is already root
+// and the target user is also root. When the connection is root but the target
+// is a non-root user, the command is still wrapped to switch users.
+func WrapBecome(cmd string, cfg BecomeConfig, isRoot bool) (wrapped string, stdin []byte) {
+	if !cfg.Enabled {
+		return cmd, nil
+	}
+	targetRoot := cfg.User == "" || cfg.User == "root"
+	if isRoot && targetRoot {
 		return cmd, nil
 	}
 
 	escaped := strings.ReplaceAll(cmd, "'", "'\"'\"'")
-	if password != "" {
-		return fmt.Sprintf("sudo -S -p '' sh -c '%s'", escaped), []byte(password + "\n")
+	method := cfg.Method
+	if method == "" {
+		method = BecomeSudo
 	}
-	return fmt.Sprintf("sudo sh -c '%s'", escaped), nil
+
+	switch method {
+	case BecomeSu:
+		user := cfg.User
+		if user == "" {
+			user = "root"
+		}
+		// su reads the password from the controlling TTY, so su become expects
+		// passwordless switching (typically root -> user).
+		return fmt.Sprintf("su - %s -c '%s'", ShellQuote(user), escaped), nil
+
+	case BecomeDoas:
+		userFlag := ""
+		if !targetRoot {
+			userFlag = "-u " + ShellQuote(cfg.User) + " "
+		}
+		// doas prompts on the TTY; passwordless (NOPASSWD) is required.
+		return fmt.Sprintf("doas %ssh -c '%s'", userFlag, escaped), nil
+
+	default: // BecomeSudo
+		userFlag := ""
+		if !targetRoot {
+			userFlag = "-u " + ShellQuote(cfg.User) + " "
+		}
+		if cfg.Password != "" {
+			return fmt.Sprintf("sudo -S -p '' %ssh -c '%s'", userFlag, escaped), []byte(cfg.Password + "\n")
+		}
+		return fmt.Sprintf("sudo %ssh -c '%s'", userFlag, escaped), nil
+	}
 }
 
 // Config holds common configuration for connectors.

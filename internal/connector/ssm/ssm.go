@@ -80,6 +80,8 @@ type Connector struct {
 	timeout        time.Duration
 	sudo           bool
 	sudoPassword   string
+	becomeMethod   string
+	becomeUser     string
 	attachS3Policy bool // temporarily grant the instance's role S3 access for transfers
 	ssmClient      ssmAPI
 	s3Client       s3API
@@ -443,6 +445,15 @@ func (c *Connector) SetSudo(enabled bool, password string) {
 	c.sudoPassword = password
 }
 
+// SetBecome configures privilege escalation (method + target user) for
+// subsequent commands. Implements connector.Becomer.
+func (c *Connector) SetBecome(cfg connector.BecomeConfig) {
+	c.sudo = cfg.Enabled
+	c.sudoPassword = cfg.Password
+	c.becomeMethod = cfg.Method
+	c.becomeUser = cfg.User
+}
+
 // Close removes any temporary IAM policy this connector attached via
 // WithAutoIAMPolicy (best-effort), then returns. SSM itself has no
 // persistent connection to tear down.
@@ -481,7 +492,12 @@ func (c *Connector) String() string {
 // the supported setup for SSM targets. Setting TACK_SSM_ALLOW_SUDO_PASSWORD
 // overrides this for accounts that accept the exposure.
 func (c *Connector) buildCommand(cmd string) (string, error) {
-	wrapped, stdin := connector.SudoWrap(cmd, c.sudo, c.sudoPassword, false)
+	wrapped, stdin := connector.WrapBecome(cmd, connector.BecomeConfig{
+		Enabled:  c.sudo,
+		Method:   c.becomeMethod,
+		User:     c.becomeUser,
+		Password: c.sudoPassword,
+	}, false)
 	if stdin == nil {
 		return wrapped, nil
 	}

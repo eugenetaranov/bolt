@@ -19,9 +19,11 @@ type cwConn struct {
 	exitCode int
 	stdout   string
 	stderr   string
+	become   connector.BecomeConfig
 }
 
-func (c *cwConn) Connect(context.Context) error { return nil }
+func (c *cwConn) SetBecome(cfg connector.BecomeConfig) { c.become = cfg }
+func (c *cwConn) Connect(context.Context) error        { return nil }
 func (c *cwConn) Execute(_ context.Context, _ string) (*connector.Result, error) {
 	return &connector.Result{Stdout: c.stdout, Stderr: c.stderr, ExitCode: c.exitCode}, nil
 }

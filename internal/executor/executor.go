@@ -1106,6 +1106,49 @@ func taskDisplayName(task *playbook.Task) string {
 	return task.String()
 }
 
+// applyBecome configures privilege escalation on the connector for one task and
+// returns a restore func that reverts to the play-level defaults. It honors
+// become_user / become_method on connectors that implement connector.Becomer,
+// and falls back to plain sudo enable/disable otherwise.
+func (e *Executor) applyBecome(pctx *PlayContext, task *playbook.Task) func() {
+	play := pctx.Play
+	enabled := task.ShouldSudo(play.Sudo)
+
+	if b, ok := pctx.Connector.(connector.Becomer); ok {
+		b.SetBecome(connector.BecomeConfig{
+			Enabled:  enabled,
+			Method:   firstNonEmpty(task.BecomeMethod, play.BecomeMethod),
+			User:     firstNonEmpty(task.BecomeUser, play.BecomeUser),
+			Password: play.SudoPassword,
+		})
+		return func() {
+			b.SetBecome(connector.BecomeConfig{
+				Enabled:  play.Sudo,
+				Method:   play.BecomeMethod,
+				User:     play.BecomeUser,
+				Password: play.SudoPassword,
+			})
+		}
+	}
+
+	// Connector supports only sudo-to-root.
+	if enabled != play.Sudo {
+		pctx.Connector.SetSudo(enabled, play.SudoPassword)
+		return func() { pctx.Connector.SetSudo(play.Sudo, play.SudoPassword) }
+	}
+	return func() {}
+}
+
+// firstNonEmpty returns the first non-empty string.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *playbook.Task, eTags []string) (*TaskResult, error) {
 	taskName := taskDisplayName(task)
 	pctx.Output.TaskStart(taskName, task.Module)
@@ -1119,13 +1162,9 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 		return s
 	}
 
-	// Handle task-level sudo override
-	playSudo := pctx.Play.Sudo
-	taskSudo := task.ShouldSudo(playSudo)
-	if taskSudo != playSudo {
-		pctx.Connector.SetSudo(taskSudo, pctx.Play.SudoPassword)
-		defer pctx.Connector.SetSudo(playSudo, pctx.Play.SudoPassword)
-	}
+	// Apply privilege escalation (sudo enable + become_user/become_method),
+	// restoring the play defaults after the task.
+	defer e.applyBecome(pctx, task)()
 
 	// Expand shorthand syntax
 	playbook.ExpandShorthand(task)

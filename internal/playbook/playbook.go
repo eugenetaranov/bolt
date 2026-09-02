@@ -103,6 +103,12 @@ type Play struct {
 	// Sudo enables privilege escalation.
 	Sudo bool `yaml:"sudo"`
 
+	// BecomeUser is the target user for privilege escalation (default: root).
+	BecomeUser string `yaml:"become_user"`
+
+	// BecomeMethod is the escalation method: sudo (default), su, or doas.
+	BecomeMethod string `yaml:"become_method"`
+
 	// GatherFacts controls whether to gather system facts (default: true).
 	GatherFacts *bool `yaml:"gather_facts"`
 
@@ -180,6 +186,12 @@ type Task struct {
 
 	// Sudo enables privilege escalation for this task.
 	Sudo *bool `yaml:"sudo"`
+
+	// BecomeUser overrides the play's target escalation user for this task.
+	BecomeUser string `yaml:"become_user"`
+
+	// BecomeMethod overrides the play's escalation method for this task.
+	BecomeMethod string `yaml:"become_method"`
 
 	// Changed controls when the task reports as changed.
 	// Can be a boolean or a conditional expression.

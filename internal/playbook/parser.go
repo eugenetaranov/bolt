@@ -40,6 +40,8 @@ var knownTaskFields = map[string]bool{
 	"retries":       true,
 	"delay":         true,
 	"sudo":          true,
+	"become_user":   true,
+	"become_method": true,
 	"changed_when":  true,
 	"failed_when":   true,
 	"no_log":        true,
@@ -411,6 +413,12 @@ func parseRawTask(raw map[string]any) (*Task, error) {
 	}
 	if v, ok := asBool(raw["sudo"]); ok {
 		task.Sudo = &v
+	}
+	if v, ok := raw["become_user"].(string); ok {
+		task.BecomeUser = v
+	}
+	if v, ok := raw["become_method"].(string); ok {
+		task.BecomeMethod = v
 	}
 	if v, ok := raw["changed_when"].(string); ok {
 		task.ChangedWhen = v
