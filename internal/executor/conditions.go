@@ -691,7 +691,8 @@ func toFloat64(v any) (float64, bool) {
 	return 0, false
 }
 
-// evalIn checks if left is contained in right (a list).
+// evalIn checks if left is contained in right. For a list, this is membership;
+// for a string, this is a substring test (matching Ansible's `'x' in stdout`).
 func evalIn(left, right any) bool {
 	leftStr := fmt.Sprintf("%v", left)
 
@@ -708,6 +709,8 @@ func evalIn(left, right any) bool {
 				return true
 			}
 		}
+	case string:
+		return strings.Contains(r, leftStr)
 	}
 	return false
 }

@@ -4,6 +4,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -1141,22 +1142,59 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 		}
 	}
 
-	if lastErr != nil {
-		pctx.Output.TaskResult(taskName, "failed", false, lastErr.Error(), eTags)
-		return &TaskResult{Status: "failed", Error: lastErr}, lastErr
+	// Assemble the canonical result data. This is available even when the
+	// module reported an error, if the error carries structured data
+	// (module.DataError) — enabling failed_when/changed_when and register to
+	// see a command's exit_code/stdout on a non-zero exit.
+	data, changed, message := taskResultFields(result, lastErr)
+
+	// Variables exposed to changed_when / failed_when expressions: the hoisted
+	// result data keys (e.g. exit_code, stdout), plus changed/message and a
+	// nested `result` map for dotted access.
+	evalVars := make(map[string]any, len(data)+3)
+	for k, v := range data {
+		evalVars[k] = v
+	}
+	evalVars["changed"] = changed
+	evalVars["message"] = message
+	evalVars["result"] = map[string]any{"changed": changed, "message": message, "data": data}
+
+	// failed_when: when set, the task's failure is determined solely by the
+	// expression (Ansible semantics), overriding a module error or success.
+	failed := lastErr != nil
+	if task.FailedWhen != "" {
+		cond, cerr := e.evaluateResultCondition(task.FailedWhen, pctx, evalVars)
+		if cerr != nil {
+			pctx.Output.TaskResult(taskName, "failed", false, cerr.Error(), eTags)
+			return &TaskResult{Status: "failed", Error: cerr}, cerr
+		}
+		failed = cond
+	}
+
+	// changed_when: when set, override the changed flag.
+	if task.ChangedWhen != "" {
+		cond, cerr := e.evaluateResultCondition(task.ChangedWhen, pctx, evalVars)
+		if cerr != nil {
+			pctx.Output.TaskResult(taskName, "failed", false, cerr.Error(), eTags)
+			return &TaskResult{Status: "failed", Error: cerr}, cerr
+		}
+		changed = cond
 	}
 
 	// Store registered result. Module-specific Data keys are hoisted to the
 	// top level so playbooks can write `{{ reg.field }}` as documented
 	// (docs/modules/*.md, llms.txt, examples/). The nested `data` map is
 	// preserved for back-compat with playbooks that use `{{ reg.data.field }}`.
+	// Registration happens even when the task ultimately fails, so a following
+	// task can inspect the captured output.
 	if task.Register != "" {
 		reg := map[string]any{
-			"changed": result.Changed,
-			"message": result.Message,
-			"data":    result.Data,
+			"changed": changed,
+			"message": message,
+			"data":    data,
+			"failed":  failed,
 		}
-		for k, v := range result.Data {
+		for k, v := range data {
 			if _, reserved := reg[k]; reserved {
 				continue
 			}
@@ -1166,8 +1204,17 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 		pctx.Vars[task.Register] = reg
 	}
 
+	if failed {
+		ferr := lastErr
+		if ferr == nil {
+			ferr = fmt.Errorf("failed_when condition met: %s", task.FailedWhen)
+		}
+		pctx.Output.TaskResult(taskName, "failed", false, ferr.Error(), eTags)
+		return &TaskResult{Status: "failed", Error: ferr}, ferr
+	}
+
 	// Handle notify
-	if result.Changed && len(task.Notify) > 0 {
+	if changed && len(task.Notify) > 0 {
 		for _, handler := range task.Notify {
 			pctx.NotifiedHandlers[handler] = true
 		}
@@ -1175,17 +1222,60 @@ func (e *Executor) runSingleTask(ctx context.Context, pctx *PlayContext, task *p
 
 	// Determine status
 	status := "ok"
-	if result.Changed {
+	if changed {
 		status = "changed"
 	}
 
-	pctx.Output.TaskResult(taskName, status, result.Changed, result.Message, eTags)
+	pctx.Output.TaskResult(taskName, status, changed, message, eTags)
 
 	return &TaskResult{
 		Status:  status,
-		Changed: result.Changed,
-		Data:    result.Data,
+		Changed: changed,
+		Data:    data,
 	}, nil
+}
+
+// taskResultFields extracts the result data, changed flag, and message from a
+// module run, tolerating a failure that carries structured data via
+// module.DataError.
+func taskResultFields(result *module.Result, runErr error) (data map[string]any, changed bool, message string) {
+	if result != nil {
+		return result.Data, result.Changed, result.Message
+	}
+	if runErr != nil {
+		var de module.DataError
+		if errors.As(runErr, &de) {
+			return de.ResultData(), false, runErr.Error()
+		}
+		return nil, false, runErr.Error()
+	}
+	return nil, false, ""
+}
+
+// evaluateResultCondition evaluates a changed_when/failed_when expression with
+// the module result temporarily injected into the play vars, restoring any
+// shadowed vars afterward.
+func (e *Executor) evaluateResultCondition(expr string, pctx *PlayContext, evalVars map[string]any) (bool, error) {
+	saved := make(map[string]any, len(evalVars))
+	added := make(map[string]bool, len(evalVars))
+	for k, v := range evalVars {
+		if old, ok := pctx.Vars[k]; ok {
+			saved[k] = old
+		} else {
+			added[k] = true
+		}
+		pctx.Vars[k] = v
+	}
+	defer func() {
+		for k := range evalVars {
+			if added[k] {
+				delete(pctx.Vars, k)
+			} else {
+				pctx.Vars[k] = saved[k]
+			}
+		}
+	}()
+	return e.evaluateCondition(expr, pctx)
 }
 
 // runTaskLoop executes a task for each item in a loop.

@@ -34,7 +34,6 @@ func (m *Module) Parameters() []module.ParamDoc {
 		{Name: "chdir", Type: "string", Description: "Change to this directory before running"},
 		{Name: "creates", Type: "string", Description: "Skip if this file/path exists (idempotency)"},
 		{Name: "removes", Type: "string", Description: "Only run if this file/path exists (idempotency)"},
-		{Name: "changed_when", Type: "string", Description: "Shell expression; task reports changed only when it exits 0"},
 	}
 }
 
@@ -137,6 +136,18 @@ func (e *CommandError) Error() string {
 		msg += fmt.Sprintf("\nstderr: %s", strings.TrimSpace(e.Stderr))
 	}
 	return msg
+}
+
+// ResultData exposes the command's output so the executor can evaluate
+// failed_when / changed_when and populate `register` even on a non-zero exit.
+// It implements module.DataError.
+func (e *CommandError) ResultData() map[string]any {
+	return map[string]any{
+		"cmd":       e.Cmd,
+		"stdout":    strings.TrimSpace(e.Stdout),
+		"stderr":    strings.TrimSpace(e.Stderr),
+		"exit_code": e.ExitCode,
+	}
 }
 
 // fileExists checks if a file or directory exists on the target.

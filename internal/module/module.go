@@ -22,6 +22,16 @@ type Result struct {
 	Data map[string]any
 }
 
+// DataError is an error that also carries structured result data (for example a
+// command's cmd/stdout/stderr/exit_code). The executor uses it to evaluate
+// failed_when / changed_when expressions and to populate `register` even when a
+// module reports failure — so, e.g., `failed_when: false` can capture a
+// non-zero command exit without aborting the play.
+type DataError interface {
+	error
+	ResultData() map[string]any
+}
+
 // Module is the interface that all modules must implement.
 type Module interface {
 	// Name returns the module's unique identifier.
