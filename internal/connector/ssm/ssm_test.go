@@ -407,8 +407,8 @@ func TestDownloadViaS3(t *testing.T) {
 }
 
 func TestEnsureS3Access_Disabled(t *testing.T) {
-	// attachS3Policy not set (WithAutoIAMPolicy not passed): no clients
-	// required, ensureS3Access is a no-op.
+	// No bucket configured, so auto-attach stays off: no clients required,
+	// ensureS3Access is a no-op.
 	c := New("i-test123")
 	require.NoError(t, c.ensureS3Access(context.Background()))
 	assert.Empty(t, c.iamAttachedRole)
@@ -464,6 +464,9 @@ func TestEnsureS3Access_AttachesScopedPolicyOnce(t *testing.T) {
 }
 
 func TestEnsureS3Access_NoInstanceProfile(t *testing.T) {
+	// Auto-attach is best-effort: a failure to resolve the role is recorded
+	// in attachErr (not returned) so the transfer still proceeds — the role
+	// may already have S3 access.
 	ec2mock := &mockEC2{
 		describeInstancesFn: func(_ context.Context, _ *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
 			return instanceWithProfile("i-test123", ""), nil
@@ -473,13 +476,100 @@ func TestEnsureS3Access_NoInstanceProfile(t *testing.T) {
 		withEC2Client(ec2mock),
 		withIAMClient(&mockIAM{}),
 		WithBucket("my-bucket"),
-		WithAutoIAMPolicy(),
 	)
 
-	err := c.ensureS3Access(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no IAM instance profile attached")
+	require.NoError(t, c.ensureS3Access(context.Background()))
 	assert.Empty(t, c.iamAttachedRole)
+	require.Error(t, c.attachErr)
+	assert.Contains(t, c.attachErr.Error(), "no IAM instance profile attached")
+}
+
+func TestEnsureS3Access_DefaultOnWithBucket(t *testing.T) {
+	// A configured bucket enables auto-attach by default — no WithAutoIAMPolicy.
+	iamPropagationDelay = 0
+
+	var putCount int
+	ec2mock := &mockEC2{
+		describeInstancesFn: func(_ context.Context, _ *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
+			return instanceWithProfile("i-test123", "arn:aws:iam::123456789012:instance-profile/my-profile"), nil
+		},
+	}
+	iamMock := &mockIAM{
+		getInstanceProfileFn: func(_ context.Context, _ *iam.GetInstanceProfileInput) (*iam.GetInstanceProfileOutput, error) {
+			return &iam.GetInstanceProfileOutput{
+				InstanceProfile: &iamtypes.InstanceProfile{
+					Roles: []iamtypes.Role{{RoleName: aws.String("my-instance-role")}},
+				},
+			}, nil
+		},
+		putRolePolicyFn: func(_ context.Context, _ *iam.PutRolePolicyInput) (*iam.PutRolePolicyOutput, error) {
+			putCount++
+			return &iam.PutRolePolicyOutput{}, nil
+		},
+	}
+	c := New("i-test123",
+		withEC2Client(ec2mock),
+		withIAMClient(iamMock),
+		WithBucket("my-bucket"),
+	)
+
+	require.NoError(t, c.ensureS3Access(context.Background()))
+	assert.Equal(t, "my-instance-role", c.iamAttachedRole)
+	assert.Equal(t, 1, putCount)
+	assert.NoError(t, c.attachErr)
+}
+
+func TestEnsureS3Access_OptOut(t *testing.T) {
+	// WithoutAutoIAMPolicy disables auto-attach even with a bucket set: the
+	// IAM/EC2 clients are never touched.
+	c := New("i-test123",
+		WithBucket("my-bucket"),
+		WithoutAutoIAMPolicy(),
+		withEC2Client(&mockEC2{
+			describeInstancesFn: func(_ context.Context, _ *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
+				t.Fatal("DescribeInstances should not be called when auto-attach is disabled")
+				return nil, nil
+			},
+		}),
+		withIAMClient(&mockIAM{}),
+	)
+
+	require.NoError(t, c.ensureS3Access(context.Background()))
+	assert.Empty(t, c.iamAttachedRole)
+	assert.NoError(t, c.attachErr)
+}
+
+func TestUploadViaS3_FoldsAttachErrorOnCopyFailure(t *testing.T) {
+	// Auto-attach can't reach IAM (nil clients), so it records attachErr and
+	// proceeds. The instance-side `aws s3 cp` then fails with AccessDenied;
+	// the returned error must combine the copy failure with the attach hint.
+	ssmMock := &mockSSM{
+		getCommandInvocationFn: func(_ context.Context, _ *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+			return &ssm.GetCommandInvocationOutput{
+				Status:                ssmtypes.CommandInvocationStatusFailed,
+				StandardErrorContent:  aws.String("An error occurred (AccessDenied) when calling the GetObject operation"),
+				StandardOutputContent: aws.String(""),
+				ResponseCode:          1,
+			}, nil
+		},
+	}
+	s3mock := &mockS3{
+		putObjectFn: func(_ context.Context, _ *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
+			return &s3.PutObjectOutput{}, nil
+		},
+	}
+	// Bucket set ⇒ auto-attach on, but no ec2/iam clients ⇒ attach folds.
+	c := New("i-test123",
+		withSSMClient(ssmMock),
+		withS3Client(s3mock),
+		WithBucket("my-bucket"),
+	)
+
+	err := c.Upload(context.Background(), strings.NewReader("data"), "/opt/file", 0755)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to copy from S3")
+	assert.Contains(t, err.Error(), "could not auto-grant")
+	assert.Contains(t, err.Error(), "iam:PutRolePolicy")
 }
 
 func TestUploadViaS3_AutoIAMPolicy(t *testing.T) {

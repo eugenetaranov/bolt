@@ -112,7 +112,7 @@ func TestVerify_RequiresInstanceID(t *testing.T) {
 	assert.Contains(t, err.Error(), "instance")
 }
 
-func TestVerify_AccessDeniedWithoutAttachPolicySuggestsIt(t *testing.T) {
+func TestVerify_AccessDeniedGivesActionableRemedies(t *testing.T) {
 	fake := &fakeConnector{
 		uploadErr: errors.New("failed to copy from S3 to /tmp/x: An error occurred (AccessDenied) when calling the PutObject operation: Access Denied"),
 	}
@@ -120,19 +120,12 @@ func TestVerify_AccessDeniedWithoutAttachPolicySuggestsIt(t *testing.T) {
 
 	_, err := m.Verify(context.Background(), VerifyOptions{InstanceID: "i-test123"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "--attach-policy")
+	// Auto-attach is the default now; the remedy points at the real fixes,
+	// not the retired --attach-policy flag.
+	assert.NotContains(t, err.Error(), "--attach-policy")
+	assert.Contains(t, err.Error(), "iam:PutRolePolicy")
+	assert.Contains(t, err.Error(), "pre-provision the instance role")
 	assert.True(t, fake.closeCalled)
-}
-
-func TestVerify_AccessDeniedWithAttachPolicyAlreadyTried(t *testing.T) {
-	fake := &fakeConnector{
-		uploadErr: errors.New("An error occurred (AccessDenied) when calling the PutObject operation: Access Denied"),
-	}
-	m := New("my-bucket", withVerifyConnectorFactory(func(VerifyOptions) connector.Connector { return fake }))
-
-	_, err := m.Verify(context.Background(), VerifyOptions{InstanceID: "i-test123", AttachPolicy: true})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "even with --attach-policy")
 }
 
 func TestVerify_NonAccessDeniedErrorNotMisclassified(t *testing.T) {

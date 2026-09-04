@@ -226,9 +226,10 @@ func TestApplyOverrides_SSMRegionAndBucket(t *testing.T) {
 }
 
 func TestApplyOverrides_SSMAttachS3Policy(t *testing.T) {
+	tru := true
 	exec := New()
 	exec.Overrides = &ConnOverrides{
-		SSMAttachS3Policy: true,
+		SSMAttachS3Policy: &tru,
 	}
 	play := &playbook.Play{}
 
@@ -237,8 +238,26 @@ func TestApplyOverrides_SSMAttachS3Policy(t *testing.T) {
 	if play.SSM == nil {
 		t.Fatal("play.SSM should not be nil")
 	}
-	if !play.SSM.AttachS3Policy {
-		t.Error("SSM.AttachS3Policy = false, want true")
+	if play.SSM.AttachS3Policy == nil || !*play.SSM.AttachS3Policy {
+		t.Errorf("SSM.AttachS3Policy = %v, want pointer to true", play.SSM.AttachS3Policy)
+	}
+}
+
+func TestApplyOverrides_SSMAttachS3Policy_Disable(t *testing.T) {
+	fls := false
+	exec := New()
+	exec.Overrides = &ConnOverrides{
+		SSMAttachS3Policy: &fls,
+	}
+	play := &playbook.Play{}
+
+	exec.ApplyOverrides(play)
+
+	if play.SSM == nil {
+		t.Fatal("play.SSM should not be nil")
+	}
+	if play.SSM.AttachS3Policy == nil || *play.SSM.AttachS3Policy {
+		t.Errorf("SSM.AttachS3Policy = %v, want pointer to false", play.SSM.AttachS3Policy)
 	}
 }
 
@@ -538,12 +557,13 @@ func TestNeedsSudoPassword_Triggers(t *testing.T) {
 }
 
 func TestConnOverrides_SSMFields(t *testing.T) {
+	tru := true
 	o := &ConnOverrides{
 		SSMInstances:      []string{"i-111", "i-222"},
 		SSMTags:           map[string]string{"Env": "prod"},
 		SSMRegion:         "ap-southeast-1",
 		SSMBucket:         "my-bucket",
-		SSMAttachS3Policy: true,
+		SSMAttachS3Policy: &tru,
 	}
 
 	if len(o.SSMInstances) != 2 {
@@ -558,8 +578,8 @@ func TestConnOverrides_SSMFields(t *testing.T) {
 	if o.SSMBucket != "my-bucket" {
 		t.Errorf("SSMBucket = %q, want my-bucket", o.SSMBucket)
 	}
-	if !o.SSMAttachS3Policy {
-		t.Error("SSMAttachS3Policy = false, want true")
+	if o.SSMAttachS3Policy == nil || !*o.SSMAttachS3Policy {
+		t.Errorf("SSMAttachS3Policy = %v, want pointer to true", o.SSMAttachS3Policy)
 	}
 }
 

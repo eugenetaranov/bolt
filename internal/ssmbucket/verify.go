@@ -18,10 +18,10 @@ type VerifyOptions struct {
 	// through. Required.
 	InstanceID string
 
-	// AttachPolicy has the underlying SSM connector temporarily attach a
-	// scoped inline IAM policy granting the instance's role S3 access to
-	// this bucket, if it doesn't already have it — the same mechanism
-	// ssm.attach_s3_policy uses. Removed again when the connection closes.
+	// AttachPolicy is retained for backward compatibility and no longer has
+	// any effect: the SSM connector now auto-attaches a scoped, temporary S3
+	// transfer policy by default whenever a bucket is configured (best-effort,
+	// removed on close). Verify always exercises that default path.
 	AttachPolicy bool
 }
 
@@ -86,25 +86,27 @@ func (m *Manager) newVerifyConnector(opts VerifyOptions) connector.Connector {
 	if m.region != "" {
 		connOpts = append(connOpts, ssmconn.WithRegion(m.region))
 	}
+	// Configuring a bucket makes the connector auto-attach a scoped,
+	// temporary S3 transfer policy by default (best-effort, removed on
+	// close), so verify exercises the same path a real transfer uses.
 	connOpts = append(connOpts, ssmconn.WithBucket(m.bucket))
-	if opts.AttachPolicy {
-		connOpts = append(connOpts, ssmconn.WithAutoIAMPolicy())
-	}
 	return ssmconn.New(opts.InstanceID, connOpts...)
 }
 
 // classifyVerifyError turns a raw transfer failure into an actionable
-// message: when it looks like an S3 access-denied error, it points the
-// user at --attach-policy (or tells them attaching didn't help, if they
-// already tried it).
-func classifyVerifyError(err error, opts VerifyOptions) error {
+// message. On an S3 access-denied error it explains that tack tries to
+// auto-attach the instance role's S3 access by default (best-effort) and
+// points at the two ways to resolve a denial: grant tack's own credentials
+// the IAM permissions needed to attach the policy, or pre-provision the
+// instance role. The connector already folds the specific auto-attach
+// failure (if any) into err, so it's preserved by the %w wrap.
+func classifyVerifyError(err error, _ VerifyOptions) error {
 	if !isAccessDeniedError(err) {
 		return fmt.Errorf("round trip through bucket failed: %w", err)
 	}
-	if opts.AttachPolicy {
-		return fmt.Errorf("round trip failed with an access-denied error even with --attach-policy: %w", err)
-	}
-	return fmt.Errorf("the instance's IAM role appears to lack S3 access to this bucket; retry with --attach-policy, or configure ssm.attach_s3_policy: %w", err)
+	return fmt.Errorf("the instance's IAM role lacks S3 access to this bucket and tack could not auto-grant it; "+
+		"grant tack's credentials iam:PutRolePolicy, ec2:DescribeInstances and iam:GetInstanceProfile, "+
+		"or pre-provision the instance role with S3 access to the transfer bucket: %w", err)
 }
 
 // isAccessDeniedError reports whether err's message indicates an S3

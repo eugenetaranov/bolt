@@ -159,16 +159,28 @@ The `bucket` field is required for file upload/download operations (copy, templa
 
 Without a bucket, file transfer falls back to inline base64 over the SSM command channel, which is capped at 24 KB. Configuring `bucket` routes larger files through S3 instead: tack uploads to `s3://<bucket>/tack-transfer/<instance-id>/...` and the instance pulls (or pushes) via `aws s3 cp`, which requires the instance's IAM role to have `s3:GetObject`/`s3:PutObject` on that bucket.
 
-If instances don't already have S3 permissions provisioned, set `attach_s3_policy: true` (or `--ssm-attach-policy` / `TACK_SSM_ATTACH_POLICY=1`) to have tack temporarily attach a scoped inline IAM policy to the instance's role before the transfer and remove it afterward:
+Whenever a `bucket` is configured, tack **auto-attaches** a scoped, temporary inline IAM policy to the instance's role before the transfer and removes it when the connection closes — so instances that aren't pre-provisioned with S3 permissions work out of the box, with no extra flags:
 
 ```yaml
 ssm:
   region: us-east-1
   bucket: my-ssm-transfer-bucket
-  attach_s3_policy: true
 ```
 
-The attached policy is scoped to `arn:aws:s3:::<bucket>/tack-transfer/<instance-id>/*` only — not the whole bucket — and is removed when the connection closes. This requires tack's own AWS credentials to have `iam:GetInstanceProfile`, `iam:PutRolePolicy`, and `iam:DeleteRolePolicy` on the instance's role.
+The attach is **best-effort**: if tack's own credentials can't attach the policy (or the instance is already provisioned with S3 access), the transfer still proceeds. It only surfaces the attach failure if the instance-side `aws s3 cp` then fails — in which case the error tells you exactly what to grant.
+
+The attached policy is scoped to `arn:aws:s3:::<bucket>/tack-transfer/<instance-id>/*` only — not the whole bucket. For tack to attach it, tack's own AWS credentials need `iam:GetInstanceProfile`, `iam:PutRolePolicy`, `iam:DeleteRolePolicy`, and `ec2:DescribeInstances`.
+
+To opt out (e.g. instances already have S3 access and you don't want tack touching IAM), set `attach_s3_policy: false` (or `--ssm-attach-policy=false` / `TACK_SSM_ATTACH_POLICY=false`):
+
+```yaml
+ssm:
+  region: us-east-1
+  bucket: my-ssm-transfer-bucket
+  attach_s3_policy: false
+```
+
+> **Note:** buckets created with `--kms-key-id` (SSE-KMS) additionally require the instance role to have `kms:Decrypt`/`kms:GenerateDataKey` on the key; the auto-attached policy currently grants only S3 actions, so KMS-encrypted transfer buckets need those KMS permissions granted separately.
 
 Use `tack ssm-bucket create` to provision this bucket (with encryption, blocked public access, and a `tack-transfer/` lifecycle rule already set up) instead of creating it by hand — see [Managing the Transfer Bucket](#managing-the-transfer-bucket) below.
 
@@ -188,8 +200,8 @@ tack ssm-bucket create --name my-bucket --kms-key-id arn:aws:kms:us-east-1:11112
 tack ssm-bucket status --name my-ssm-transfer-bucket
 
 # Confirm a specific instance can actually upload/download through the
-# bucket, attaching a temporary IAM policy if it doesn't already have access
-tack ssm-bucket verify --name my-ssm-transfer-bucket --instance i-0abc123 --attach-policy
+# bucket (auto-attaches a temporary IAM policy by default if needed)
+tack ssm-bucket verify --name my-ssm-transfer-bucket --instance i-0abc123
 
 # Delete the bucket (and everything in it — objects, all versions and
 # delete markers if it was ever versioned, incomplete multipart uploads)
@@ -221,8 +233,11 @@ tack run patch.yaml --ssm-tags env=production,role=app-server --ssm-region us-ea
 # Direct instance IDs
 tack run patch.yaml --ssm-instances i-0abc123,i-0def456 --ssm-region us-east-1 --ssm-bucket my-bucket
 
-# Large file transfer without pre-provisioned S3 permissions
-tack run deploy.yaml --ssm-instances i-0abc123 --ssm-bucket my-bucket --ssm-attach-policy
+# Large file transfer: auto-attach is on by default when a bucket is set
+tack run deploy.yaml --ssm-instances i-0abc123 --ssm-bucket my-bucket
+
+# Opt out of auto-attach (instances already have S3 access)
+tack run deploy.yaml --ssm-instances i-0abc123 --ssm-bucket my-bucket --ssm-attach-policy=false
 ```
 
 ### Environment Variables
@@ -233,7 +248,7 @@ tack run deploy.yaml --ssm-instances i-0abc123 --ssm-bucket my-bucket --ssm-atta
 | `TACK_SSM_TAGS` | Comma-separated key=value tags |
 | `TACK_SSM_REGION` | AWS region |
 | `TACK_SSM_BUCKET` | S3 bucket for file transfer |
-| `TACK_SSM_ATTACH_POLICY` | Temporarily attach an S3-access IAM policy to the instance role (`1`, `true`, or `yes`) |
+| `TACK_SSM_ATTACH_POLICY` | Override auto-attach of the temporary S3-access IAM policy. On by default when a bucket is set; set `0`/`false`/`no` to opt out (`1`/`true`/`yes` to force on) |
 
 AWS credentials use the standard SDK credential chain (env vars, shared config, IAM roles).
 

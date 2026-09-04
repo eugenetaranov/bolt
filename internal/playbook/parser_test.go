@@ -118,15 +118,15 @@ tasks:
 	if ssm.Bucket != "my-transfer-bucket" {
 		t.Errorf("Bucket = %q, want my-transfer-bucket", ssm.Bucket)
 	}
-	if !ssm.AttachS3Policy {
-		t.Error("AttachS3Policy = false, want true")
+	if ssm.AttachS3Policy == nil || !*ssm.AttachS3Policy {
+		t.Errorf("AttachS3Policy = %v, want pointer to true", ssm.AttachS3Policy)
 	}
 	if ssm.Tags["env"] != "production" {
 		t.Errorf("Tags[env] = %q, want production", ssm.Tags["env"])
 	}
 }
 
-func TestParseSSMConfig_AttachS3PolicyDefaultsFalse(t *testing.T) {
+func TestParseSSMConfig_AttachS3PolicyDefaultsNil(t *testing.T) {
 	yamlSrc := `
 name: Patch fleet
 connection: ssm
@@ -143,8 +143,33 @@ tasks:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if pb.Plays[0].SSM.AttachS3Policy {
-		t.Error("AttachS3Policy should default to false when omitted")
+	// Omitted ⇒ nil ⇒ default-on (best-effort) at the connector.
+	if pb.Plays[0].SSM.AttachS3Policy != nil {
+		t.Errorf("AttachS3Policy should be nil when omitted, got %v", *pb.Plays[0].SSM.AttachS3Policy)
+	}
+}
+
+func TestParseSSMConfig_AttachS3PolicyExplicitFalse(t *testing.T) {
+	yamlSrc := `
+name: Patch fleet
+connection: ssm
+hosts: [i-0abc123]
+ssm:
+  region: us-east-1
+  bucket: my-transfer-bucket
+  attach_s3_policy: false
+tasks:
+  - name: noop
+    command:
+      cmd: echo hi
+`
+	pb, err := ParseRaw([]byte(yamlSrc), "test.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := pb.Plays[0].SSM.AttachS3Policy
+	if got == nil || *got {
+		t.Errorf("AttachS3Policy = %v, want pointer to false", got)
 	}
 }
 

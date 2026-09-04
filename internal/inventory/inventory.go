@@ -34,10 +34,11 @@ type GroupSSMConfig struct {
 	// Tags selects EC2 instances by tag at runtime (mutually exclusive with Instances).
 	Tags map[string]string `yaml:"tags" json:"tags,omitempty"`
 
-	// AttachS3Policy temporarily grants the instance's IAM role S3 access
-	// to the transfer bucket for the duration of the play. Mirrors
-	// playbook.SSMConfig.AttachS3Policy.
-	AttachS3Policy bool `yaml:"attach_s3_policy" json:"attach_s3_policy,omitempty"`
+	// AttachS3Policy controls temporary IAM policy attachment granting the
+	// instance's role S3 access to the transfer bucket. Mirrors
+	// playbook.SSMConfig.AttachS3Policy: nil = default-on (best-effort)
+	// whenever a bucket is set, false = opt out.
+	AttachS3Policy *bool `yaml:"attach_s3_policy" json:"attach_s3_policy,omitempty"`
 }
 
 // GroupEntry defines a named group of hosts.

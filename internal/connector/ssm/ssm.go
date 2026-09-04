@@ -84,6 +84,7 @@ type Connector struct {
 	becomeUser     string
 	env            map[string]string
 	attachS3Policy bool // temporarily grant the instance's role S3 access for transfers
+	attachDisabled bool // operator explicitly opted out of auto-attach
 	ssmClient      ssmAPI
 	s3Client       s3API
 	ec2Client      ec2API
@@ -93,6 +94,13 @@ type Connector struct {
 	// attached to, or "" if none is attached. Set once per connector
 	// lifetime by ensureS3Access; cleared by Close after removal.
 	iamAttachedRole string
+
+	// attachErr records why an auto-attach attempt failed. Auto-attach is
+	// best-effort: rather than aborting the transfer, ensureS3Access stashes
+	// the failure here and lets the transfer proceed (the role may already
+	// have S3 access). It's surfaced only if the instance-side `aws s3 cp`
+	// then fails, so the operator sees an actionable, combined error.
+	attachErr error
 }
 
 // Option configures the SSM connector.
@@ -136,12 +144,22 @@ func WithSudoPassword(password string) Option {
 // WithAutoIAMPolicy enables temporary attachment of an inline IAM policy
 // granting the instance's role S3 access to the transfer bucket's
 // tack-transfer/ prefix. The policy is attached on first S3 transfer and
-// removed on Close. Use for instances that don't already have S3
-// permissions provisioned; SSM's own file-transfer path caps out around
-// 20 KB, so larger transfers require S3.
+// removed on Close. As of default-on auto-attach this is redundant with
+// simply configuring a bucket (see New) — kept for backward compatibility
+// and to force-enable if a bucket isn't set at option time.
 func WithAutoIAMPolicy() Option {
 	return func(c *Connector) {
 		c.attachS3Policy = true
+	}
+}
+
+// WithoutAutoIAMPolicy opts out of the default auto-attach behavior: the
+// connector will not touch the instance's IAM role. Use when instances are
+// already provisioned with S3 access, or when tack's own credentials lack
+// iam:PutRolePolicy and you'd rather not attempt the attach at all.
+func WithoutAutoIAMPolicy() Option {
+	return func(c *Connector) {
+		c.attachDisabled = true
 	}
 }
 
@@ -181,6 +199,12 @@ func New(instanceID string, opts ...Option) *Connector {
 	}
 	for _, opt := range opts {
 		opt(c)
+	}
+	// Default-on: whenever a transfer bucket is configured, auto-attach a
+	// scoped, temporary S3 policy to the instance role (removed on Close),
+	// unless the operator explicitly opted out. Best-effort — see attachErr.
+	if c.bucket != "" && !c.attachDisabled {
+		c.attachS3Policy = true
 	}
 	return c
 }
@@ -352,7 +376,7 @@ func (c *Connector) uploadViaS3(ctx context.Context, data []byte, dst, modeStr s
 		connector.ShellQuote(c.bucket), connector.ShellQuote(key), connector.ShellQuote(dst), modeStr, connector.ShellQuote(dst))
 	if _, err := connector.Run(ctx, c, cmd); err != nil {
 		c.cleanupS3(ctx, key)
-		return fmt.Errorf("failed to copy from S3 to %s: %w", dst, err)
+		return c.withAttachErr(fmt.Errorf("failed to copy from S3 to %s: %w", dst, err))
 	}
 
 	c.cleanupS3(ctx, key)
@@ -398,7 +422,7 @@ func (c *Connector) downloadViaS3(ctx context.Context, src string, dst io.Writer
 	// Copy from instance to S3
 	cmd := fmt.Sprintf("aws s3 cp %s s3://%s/%s", connector.ShellQuote(src), connector.ShellQuote(c.bucket), connector.ShellQuote(key))
 	if _, err := connector.Run(ctx, c, cmd); err != nil {
-		return fmt.Errorf("failed to copy %s to S3: %w", src, err)
+		return c.withAttachErr(fmt.Errorf("failed to copy %s to S3: %w", src, err))
 	}
 
 	// Get from S3
@@ -538,12 +562,35 @@ func (c *Connector) cleanupS3(ctx context.Context, key string) {
 
 // ensureS3Access lazily attaches a scoped inline IAM policy to the
 // instance's IAM role granting access to this instance's tack-transfer/
-// prefix in the bucket, if WithAutoIAMPolicy was enabled and this
-// connector hasn't already attached one. Idempotent — a second call is a
-// no-op. The attached policy is removed on Close.
+// prefix in the bucket, if auto-attach is enabled (default when a bucket is
+// configured; see New) and this connector hasn't already attached one.
+// Idempotent — a second successful call is a no-op.
+//
+// Auto-attach is best-effort and never aborts a transfer: if the attach
+// fails (tack's credentials lack iam:PutRolePolicy, the instance has no
+// profile, the IAM clients weren't built, etc.), the reason is stashed in
+// c.attachErr and nil is returned so the transfer proceeds — the role may
+// already have S3 access. The stashed error is surfaced by the caller only
+// if the instance-side transfer then fails. The attached policy is removed
+// on Close.
 func (c *Connector) ensureS3Access(ctx context.Context) error {
-	if !c.attachS3Policy || c.iamAttachedRole != "" {
+	if !c.attachS3Policy || c.iamAttachedRole != "" || c.attachErr != nil {
 		return nil
+	}
+	if err := c.attachS3AccessPolicy(ctx); err != nil {
+		// Best-effort: record and continue. Don't retry on later transfers
+		// within the same connection (attachErr stays set).
+		c.attachErr = err
+	}
+	return nil
+}
+
+// attachS3AccessPolicy resolves the instance's IAM role and attaches the
+// scoped transfer policy. Returns an error describing exactly what failed;
+// ensureS3Access decides whether to surface it.
+func (c *Connector) attachS3AccessPolicy(ctx context.Context) error {
+	if c.ec2Client == nil || c.iamClient == nil {
+		return fmt.Errorf("IAM/EC2 clients unavailable; cannot auto-attach an S3 transfer policy")
 	}
 
 	out, err := c.ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
@@ -599,6 +646,19 @@ func (c *Connector) ensureS3Access(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// withAttachErr augments a failed instance-side transfer error with the
+// reason auto-attach couldn't grant the instance role S3 access, if that's
+// why the transfer likely failed. When auto-attach succeeded (or was
+// disabled) the original error is returned unchanged.
+func (c *Connector) withAttachErr(err error) error {
+	if c.attachErr == nil {
+		return err
+	}
+	return fmt.Errorf("%w (tack could not auto-grant the instance's IAM role S3 access: %v; "+
+		"grant tack's credentials iam:PutRolePolicy, ec2:DescribeInstances and iam:GetInstanceProfile, "+
+		"or pre-provision the instance role with S3 access to the transfer bucket)", err, c.attachErr)
 }
 
 // instanceProfileNameFromARN extracts the instance profile name from its

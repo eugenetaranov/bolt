@@ -59,9 +59,10 @@ var ssmBucketVerifyCmd = &cobra.Command{
 	Short: "Verify an instance can transfer files through the SSM bucket",
 	Long: `Uploads a small test file to the bucket via the named SSM-managed
 instance, downloads it back, confirms the content matches, and removes it.
-With --attach-policy, temporarily grants the instance's IAM role S3 access
-to the bucket if it doesn't already have it (the same mechanism
-ssm.attach_s3_policy uses), removing the grant again afterward.`,
+By default this temporarily grants the instance's IAM role S3 access to the
+bucket if it doesn't already have it (best-effort, removed again afterward),
+exercising the same path a real transfer uses. The --attach-policy flag is
+retained for backward compatibility and has no effect.`,
 	Args: cobra.NoArgs,
 	RunE: runSSMBucketVerify,
 }
@@ -83,7 +84,7 @@ func init() {
 	ssmBucketDeleteCmd.Flags().Bool("unmanaged", false, "Allow deleting a bucket tack didn't create (missing the ManagedBy=tack tag)")
 
 	ssmBucketVerifyCmd.Flags().String("instance", "", "SSM-managed instance ID to round-trip a test transfer through (required)")
-	ssmBucketVerifyCmd.Flags().Bool("attach-policy", false, "Temporarily attach an IAM policy granting the instance S3 access if it doesn't already have it")
+	ssmBucketVerifyCmd.Flags().Bool("attach-policy", false, "Deprecated/no-op: auto-attach is now on by default whenever a bucket is set")
 }
 
 // ssmBucketNameAndRegion resolves --name/--region, falling back to
